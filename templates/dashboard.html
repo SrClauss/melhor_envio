@@ -1,11 +1,53 @@
-<!-- templates/dashboard.html -->
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Minha App{% endblock %}
+{% block title %}Dashboard - Melhor Envio{% endblock %}
 
 {% block content %}
-<div class="dashboard-container">
-    <h1>Bem-vindo ao Dashboard!</h1>
-
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title mb-0">Dashboard</h2>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-success" role="alert">
+                    <h4 class="alert-heading">Bem-vindo!</h4>
+                    <p>Você está logado no sistema de gestão do Melhor Envio.</p>
+                    <hr>
+                    <p class="mb-0">Use o menu de navegação para acessar as diferentes funcionalidades.</p>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-md-4">
+                        <div class="card bg-primary text-white">
+                            <div class="card-body">
+                                <h5 class="card-title">Gestão de Token</h5>
+                                <p class="card-text">Configure e gerencie seu token de acesso do Melhor Envio.</p>
+                                <a href="/tokens" class="btn btn-light">Acessar</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-success text-white">
+                            <div class="card-body">
+                                <h5 class="card-title">Envios Ativos</h5>
+                                <p class="card-text">Visualize e gerencie seus envios ativos.</p>
+                                <a href="/envios" class="btn btn-light">Acessar</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-info text-white">
+                            <div class="card-body">
+                                <h5 class="card-title">Relatórios</h5>
+                                <p class="card-text">Em breve: relatórios e estatísticas de envios.</p>
+                                <button class="btn btn-light" disabled>Em breve</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

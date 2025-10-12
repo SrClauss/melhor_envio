@@ -1,24 +1,40 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css?v=3">
-    <title>Login</title>
+    <title>Login - Melhor Envio</title>
 </head>
-<body class="login-page">
-    <div class="login-container">
-        <div class="login-box">
-            <div class="logo">
-                <img src="/img/logo.png" alt="Logo" width="50">
+<body class="bg-light">
+    <div class="container">
+        <div class="row justify-content-center align-items-center min-vh-100">
+            <div class="col-md-6 col-lg-4">
+                <div class="card shadow">
+                    <div class="card-body p-4">
+                        <div class="text-center mb-4">
+                            <img src="/img/logo.png" alt="Logo" width="50" class="mb-3">
+                            <h2 class="card-title">LOGIN</h2>
+                        </div>
+                        <form action="/login" method="POST">
+                            <div class="mb-3">
+                                <label for="username" class="form-label">Usuário</label>
+                                <input type="text" class="form-control" id="username" name="username" placeholder="Digite seu usuário" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="password" class="form-label">Senha</label>
+                                <input type="password" class="form-control" id="password" name="password" placeholder="Digite sua senha" required>
+                            </div>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary">Entrar</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
             </div>
-            <h1>LOGIN</h1>
-            <form action="/login" method="POST">
-                <input type="text" placeholder="Username" name="username" required>
-                <input type="password" placeholder="Password" name="password" required>
-                <button type="submit">Sign In</button>
-            </form>
         </div>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
