@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Envios Ativos - Minha App{% endblock %}
+
+{% block content %}
+<div class="envios-container">
+    <h1>Envios Ativos</h1>
+    <p>Aqui você pode ver seus envios ativos.</p>
+    <!-- Conteúdo adicional para envios ativos -->
+     <div>
+
+
+         <pre id="enviosData">
+    
+    
+         </pre>
+     </div>
+</div>
+<script>
+    var enviosAtivos = [];
+    async function getEnviosAtivos(status) {
+
+        try {
+            // Chama a rota proxy no backend para evitar problemas de CORS
+            const resp = await axios.get('/api/melhorenvio/shipments', {
+                params: { status: status }
+            });
+
+            return resp.data;
+        } catch(err) {
+            console.error('Erro ao buscar envios:', err);
+            return null;
+        }
+    }
+
+    // Executar quando a página carregar
+    async function inicializar() {
+        const envios = await getEnviosAtivos('posted');
+        document.getElementById('enviosData').textContent = JSON.stringify(envios, null, 2);
+    }
+    
+    inicializar();
+           
+</script>
+{% endblock %}

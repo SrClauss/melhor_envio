@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Gestão de Tokens - Minha App{% endblock %}
+
+{% block content %}
+<div class="tokens-container">
+    <h1>Gestão de Tokens</h1>
+    <p>Aqui você pode gerenciar seus tokens.</p>
+    <!-- Exibe token atual e expiração (forneça token_melhor_envio e token_expiration no contexto) -->
+    <div class="current-token" id="currentToken"
+         data-token="{{ token_melhor_envio | default('') }}"
+         data-exp="{{ token_expiration | default('') }}">
+        <label><strong>Token atual:</strong></label>
+    <!-- textarea somente leitura para token grande (não editável, copiável) -->
+    <textarea id="tokenValue" rows="6" readonly style="width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;resize:vertical;white-space:pre-wrap;overflow:auto;">{{ token_melhor_envio | default('Nenhum token encontrado') }}</textarea>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+            <button id="copyTokenBtn" type="button">Copiar token</button>
+            <button id="revealBtn" type="button">Revelar / Selecionar</button>
+        </div>
+        <div style="margin-top:10px;color:#333;font-size:0.95rem;">
+            <strong>Expiração:</strong>
+            <div id="tokenExp" style="margin-top:6px;padding:8px;background:#f7f9fc;border-radius:6px;border:1px solid #eee;">{{ token_expiration | default('Sem informação de expiração') }}</div>
+        </div>
+    </div>
+
+    <hr style="margin:18px 0">
+
+    <!-- Form para atualizar token usando o endpoint /token_melhor_envio -->
+    <form id="updateTokenForm">
+        <label for="newToken"><strong>Novo token (cole aqui)</strong></label>
+        <div style="margin-top:6px;">
+            <textarea id="newToken" name="token" rows="6" placeholder="Cole o token completo aqui" style="width:100%;padding:10px;border-radius:6px;border:1px solid #ddd;resize:vertical;"></textarea>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+            <button id="pasteBtn" type="button">Colar</button>
+            <button id="submitTokenBtn" type="submit">Salvar token</button>
+            <span id="updateStatus" style="color:green;display:none;margin-left:8px;">Atualizado com sucesso</span>
+        </div>
+    </form>
+
+    <script>
+    (function(){
+        const container = document.getElementById('currentToken');
+    const tokenValue = document.getElementById('tokenValue');
+        const tokenExp = document.getElementById('tokenExp');
+        const copyBtn = document.getElementById('copyTokenBtn');
+        const pasteBtn = document.getElementById('pasteBtn');
+    const newTokenInput = document.getElementById('newToken');
+        const form = document.getElementById('updateTokenForm');
+        const status = document.getElementById('updateStatus');
+    const revealBtn = document.getElementById('revealBtn');
+
+        // copiar token atual
+        copyBtn.addEventListener('click', async ()=>{
+            const t = container.dataset.token || tokenValue.value || '';
+            try {
+                await navigator.clipboard.writeText(t);
+                copyBtn.textContent = 'Copiado!';
+                setTimeout(()=> copyBtn.textContent = 'Copiar token', 1500);
+            } catch(e){
+                alert('Não foi possível copiar: ' + e);
+            }
+        });
+
+        // revelar / selecionar o conteúdo do textarea exibido
+        revealBtn.addEventListener('click', ()=>{
+            tokenValue.focus();
+            tokenValue.select();
+        });
+
+        // colar do clipboard no textarea de edição
+        pasteBtn.addEventListener('click', async ()=>{
+            try{
+                const text = await navigator.clipboard.readText();
+                newTokenInput.value = text;
+            }catch(e){
+                alert('Não foi possível acessar o clipboard: ' + e);
+            }
+        });
+
+        // submit por fetch para evitar redirecionamento
+        form.addEventListener('submit', async (ev)=>{
+            ev.preventDefault();
+            status.style.display = 'none';
+                const fd = new FormData();
+                fd.append('token', newTokenInput.value || '');
+            try{
+                const resp = await fetch('/api/token_melhor_envio', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin',
+                    redirect: 'follow'
+                });
+                if(resp.ok || (resp.status >= 200 && resp.status < 400)){
+                    status.style.display = 'inline';
+                    // opcional: atualizar valor exibido sem recarregar
+                    tokenValue.textContent = newTokenInput.value;
+                    container.dataset.token = newTokenInput.value;
+                } else {
+                    const text = await resp.text();
+                    alert('Falha ao atualizar token: ' + resp.status + '\n' + text);
+                }
+            }catch(err){
+                alert('Erro ao enviar requisição: ' + err);
+            }
+        });
+    })();
+    </script>
+</div>
+{% endblock %}

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/css/style.css?v=3">
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <title>Document</title>
+</head>
+<body>
+    <div class="site-wrapper">
+        <div class="background-decor"></div>
+        <div class="content-wrapper">
+            <div class="site-container">
+                <header class="site-header">
+                    <nav class="navbar">
+                        <div class="navbar-inner">
+                            <a href="/" class="navbar-brand">Melhor Envio</a>
+                            <!-- Botão toggle para telas pequenas -->
+                            <button class="nav-toggle" aria-label="Abrir menu" aria-expanded="false">
+                                <span class="hamburger"></span>
+                            </button>
+                            <ul class="navbar-menu">
+                                <li><a href="/dashboard" class="navbar-link">Dashboard</a></li>
+                                <li><a href="/tokens" class="navbar-link">Gestao de Token</a></li>
+                                <li><a href="/envios" class="navbar-link">Envios Ativos</a></li>
+                                <li>
+                                    <form action="/logout" method="POST" class="logout-form">
+                                        <button type="submit" class="nav-logout-button">Sair</button>
+                                    </form>
+                                </li>
+                            </ul>
+                        </div>
+                    </nav>
+                </header>
+
+                <main class="content-area">
+                    {% block content %}{% endblock %}
+                </main>
+            </div>
+        </div>
+    </div>
+    <script>
+        // Toggle simples para o menu em telas pequenas
+        (function(){
+            const btn = document.querySelector('.nav-toggle');
+            const menu = document.querySelector('.navbar-menu');
+            if(!btn || !menu) return;
+            btn.addEventListener('click', function(){
+                const isOpen = menu.classList.toggle('open');
+                btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+        })();
+    </script>
+</body>
+</html>
