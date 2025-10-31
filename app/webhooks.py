@@ -133,20 +133,83 @@ def formatar_rastreio_para_whatsapp(rastreio_data):
         eventos = rastreio_data.get('eventos', [])
         if not eventos:
             return "📦 Sem movimentação registrada"
-        
-        # Formatar os 3 eventos mais recentes
+
+        # Se não houver 'ultimo_evento' explícito, usar o primeiro evento para montar a mensagem
+        if eventos:
+            primeiro = eventos[0]
+            # Tentar extrair mesmos campos usados quando 'ultimo_evento' existe
+            codigo = rastreio_data.get('codigo_original') or rastreio_data.get('codigo_interno') or ''
+            status_atual = rastreio_data.get('status_atual') or ''
+            consulta = rastreio_data.get('consulta_realizada_em') or ''
+
+            def _format_data_br(dt_raw):
+                if not dt_raw:
+                    return 'Data desconhecida'
+                try:
+                    part_date, part_time = dt_raw.split('T')
+                    time_part = part_time.replace('Z', '')
+                    hhmm = time_part.split(':')[:2]
+                    hhmm = ':'.join(hhmm)
+                    yyyy, mm, dd = part_date.split('-')
+                    return f"{dd}/{mm}/{yyyy} {hhmm}"
+                except Exception:
+                    return dt_raw.replace('T', ' ').replace('Z', '')[:16]
+
+            data_raw = primeiro.get('data_registro') or primeiro.get('data_criacao') or ''
+            data_amigavel = _format_data_br(data_raw)
+
+            titulo = primeiro.get('titulo') or primeiro.get('descricao') or 'Evento'
+            origem = primeiro.get('origem') or ''
+            destino = primeiro.get('destino') or ''
+            localizacao = primeiro.get('localizacao') or ''
+            rota = primeiro.get('rota') or ''
+
+            linhas = []
+            if codigo:
+                linhas.append(f"📦 Rastreio: {codigo}")
+            if status_atual:
+                linhas.append(f"Status: {status_atual}")
+            linhas.append(f"Última atualização: {data_amigavel}")
+
+            detalhe = titulo
+            if origem or destino or rota:
+                partes = []
+                if origem:
+                    partes.append(origem)
+                if destino:
+                    partes.append(destino)
+                if rota and not (origem or destino):
+                    partes.append(rota)
+                if partes:
+                    detalhe += " — " + " → ".join([p for p in partes if p])
+
+            if localizacao:
+                detalhe += f" ({localizacao})"
+
+            linhas.append(f"• {detalhe}")
+
+            if consulta:
+                linhas.append(f"Consulta em: {_format_data_br(consulta)}")
+
+            if codigo:
+                linhas.append("")
+                linhas.append(f"Ver rastreio: https://melhorrastreio.com.br/{codigo}")
+
+            return "\n".join(linhas)
+
+        # Formatar os 3 eventos mais recentes (fallback)
         linhas = ["📦 Últimas atualizações do rastreio:"]
         for evento in eventos[:3]:
             data = evento.get('data_registro', '').split('T')[0] if evento.get('data_registro') else 'Data desconhecida'
             titulo = evento.get('titulo') or evento.get('descricao') or 'Evento'
             localizacao = evento.get('localizacao') or ''
-            
+
             linha = f"• {data}: {titulo}"
             if localizacao:
                 linha += f" ({localizacao})"
-            
+
             linhas.append(linha)
-        
+
         return '\n'.join(linhas)
     
     # Fallback para outros tipos
@@ -516,9 +579,48 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
     # Usar IntervalTrigger com o intervalo especificado
     trigger = IntervalTrigger(minutes=interval_minutes)
     
+    def _get_monitor_hours(job_db):
+        """Retorna tuple (start_hour, end_hour) lidos do DB ou .env com fallback 6-18."""
+        try:
+            if job_db is None:
+                job_db = rocksdbpy.open('database.db', rocksdbpy.Option())
+            start_key = b"config:monitor_start_hour"
+            end_key = b"config:monitor_end_hour"
+            start = job_db.get(start_key)
+            end = job_db.get(end_key)
+            if start:
+                start_hour = int(start.decode('utf-8'))
+            else:
+                start_hour = int(os.getenv('MONITOR_START_HOUR', 6))
+            if end:
+                end_hour = int(end.decode('utf-8'))
+            else:
+                end_hour = int(os.getenv('MONITOR_END_HOUR', 18))
+            # sanitize
+            start_hour = max(0, min(23, start_hour))
+            end_hour = max(0, min(24, end_hour))
+            return start_hour, end_hour
+        except Exception as e:
+            print(f"[CRON] Erro ao ler horas de monitoramento: {e}")
+            return 6, 18
+
+    # Agendar um job que só executa as consultas dentro do horário permitido (configurável)
+    async def _scheduled_job(job_db):
+        now = datetime.now()
+        hour = now.hour
+        start_hour, end_hour = _get_monitor_hours(job_db)
+        # Executar apenas entre start_hour (inclusive) e end_hour (exclusive)
+        if start_hour <= hour < end_hour:
+            try:
+                await consultar_shipments_async(job_db)
+            except Exception as e:
+                print(f"[CRON] Erro ao executar consultar_shipments_async: {e}")
+        else:
+            print(f"[CRON] Pulando execução automática fora do horário permitido ({now.strftime('%Y-%m-%d %H:%M')}) - permitido {start_hour}:00-{end_hour}:00")
+
     try:
         scheduler.add_job(
-            consultar_shipments_async,
+            _scheduled_job,
             trigger=trigger,
             args=[db],
             id='monitor_shipments',

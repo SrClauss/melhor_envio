@@ -58,6 +58,23 @@
                                         </div>
                                     </div>
                                 </form>
+                                <hr>
+                                <form id="hoursForm" method="post" action="/api/config/monitor_hours">
+                                    <div class="row">
+                                        <div class="col-md-3">
+                                            <label for="start_hour" class="form-label">Início do Monitoramento (hora)</label>
+                                            <input type="number" class="form-control" id="start_hour" name="start_hour" min="0" max="23" required>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label for="end_hour" class="form-label">Fim do Monitoramento (hora)</label>
+                                            <input type="number" class="form-control" id="end_hour" name="end_hour" min="1" max="24" required>
+                                        </div>
+                                        <div class="col-md-6 d-flex align-items-end">
+                                            <button type="submit" class="btn btn-secondary">Salvar Horário</button>
+                                            <div class="ms-3 text-muted align-self-center">Padrão: 06:00 - 18:00</div>
+                                        </div>
+                                    </div>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -98,6 +115,32 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .catch(error => {
             alert('Erro ao salvar configuração: ' + error.message);
+        });
+    });
+    
+    // Carregar e manipular horário do monitoramento
+    fetch('/api/config/monitor_hours')
+        .then(resp => resp.json())
+        .then(data => {
+            document.getElementById('start_hour').value = data.start_hour;
+            document.getElementById('end_hour').value = data.end_hour;
+        })
+        .catch(err => console.error('Erro ao carregar horas de monitoramento:', err));
+
+    document.getElementById('hoursForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const form = new FormData(this);
+        fetch('/api/config/monitor_hours', {
+            method: 'POST',
+            body: form
+        })
+        .then(r => r.json())
+        .then(d => {
+            alert('Horário de monitoramento salvo: ' + d.message);
+            window.location.reload();
+        })
+        .catch(err => {
+            alert('Erro ao salvar horário: ' + err.message);
         });
     });
 });

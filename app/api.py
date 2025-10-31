@@ -1,4 +1,5 @@
 import json
+import os
 from fastapi import APIRouter, Form, Request, HTTPException
 from fastapi.responses import RedirectResponse
 import requests
@@ -303,5 +304,44 @@ async def get_interval_minutes(request: Request):
         interval_minutes = 30
 
     return {"interval_minutes": interval_minutes}
+
+
+@router.post('/config/monitor_hours')
+async def set_monitor_hours(request: Request, start_hour: int = Form(...), end_hour: int = Form(...)):
+    """
+    Define o intervalo de horas (start_hour inclusive, end_hour exclusive) em que o monitor deve executar.
+    Valores esperados: start_hour 0-23, end_hour 1-24, end_hour > start_hour normalmente.
+    """
+    if not (0 <= start_hour <= 23) or not (1 <= end_hour <= 24):
+        raise HTTPException(status_code=400, detail="Horas devem estar no intervalo 0-23 (start) e 1-24 (end)")
+
+    db = request.app.state.db
+    db.set(b"config:monitor_start_hour", str(int(start_hour)).encode('utf-8'))
+    db.set(b"config:monitor_end_hour", str(int(end_hour)).encode('utf-8'))
+
+    # Reiniciar o monitoramento para aplicar imediatamente (se ativo)
+    try:
+        from app import webhooks
+        webhooks.parar_monitoramento()
+        webhooks.iniciar_monitoramento(interval_minutes=int(db.get(b"config:interval_minutes") or b"30"), db=db)
+    except Exception as e:
+        print(f"[CONFIG] Erro ao reiniciar monitoramento após alterar horas: {e}")
+
+    return {"message": f"Horas de monitoramento definidas: {start_hour}:00 - {end_hour}:00"}
+
+
+@router.get('/config/monitor_hours')
+async def get_monitor_hours(request: Request):
+    """Retorna as horas de monitoramento configuradas (start_hour, end_hour)."""
+    db = request.app.state.db
+    start = db.get(b"config:monitor_start_hour")
+    end = db.get(b"config:monitor_end_hour")
+    try:
+        start_hour = int(start.decode('utf-8')) if start else int(os.getenv('MONITOR_START_HOUR', 6))
+        end_hour = int(end.decode('utf-8')) if end else int(os.getenv('MONITOR_END_HOUR', 18))
+    except Exception:
+        start_hour, end_hour = 6, 18
+
+    return {"start_hour": start_hour, "end_hour": end_hour}
 
 
