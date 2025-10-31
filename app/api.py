@@ -1,9 +1,9 @@
+import json
 from fastapi import APIRouter, Form, Request, HTTPException
 from fastapi.responses import RedirectResponse
-import bcrypt
-
 import requests
 from fastapi.responses import JSONResponse
+import asyncio
 
 def get_current_user(request: Request):
     """
@@ -19,35 +19,6 @@ def get_current_user(request: Request):
 
 router = APIRouter()
 
-@router.post("/login")
-async def process_login(request: Request, username: str = Form(...), password: str = Form(...)):
-    """
-    Processa o login do usuário usando o RocksDB armazenado em request.app.state.db.
-    Retorna JSON com status.
-    """
-    db = request.app.state.db
-    # Recupera senha armazenada (bytes) para a chave user:<username>
-    key = b"user:" + username.encode('utf-8')
-    stored = db.get(key)
-    
-    print(f"[DEBUG] Tentativa de login - Username: {username}")
-    print(f"[DEBUG] Senha encontrada no DB: {stored is not None}")
-    
-    if not stored:
-        print(f"[DEBUG] Usuário {username} não encontrado")
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-
-    # stored é o hash bcrypt (bytes)
-    if bcrypt.checkpw(password.encode('utf-8'), stored):
-        # Login bem-sucedido: armazenar na sessão e redirecionar
-        print(f"[DEBUG] Login bem-sucedido para {username}")
-        request.session["user"] = username
-        print(f"[DEBUG] Sessão após login: {request.session.get('user')}")
-        return RedirectResponse(url="/dashboard", status_code=303)
-    else:
-        print(f"[DEBUG] Senha incorreta para {username}")
-        raise HTTPException(status_code=401, detail="Credenciais inválidas")
-
 @router.post("/token_melhor_envio")
 async def set_token(request: Request, token: str = Form(...)):
     """
@@ -58,6 +29,14 @@ async def set_token(request: Request, token: str = Form(...)):
     db = request.app.state.db
     key = b"token:melhor_envio"
     db.set(key, token.encode('utf-8'))
+
+    # Após definir o token, fazer uma busca inicial completa dos shipments
+    try:
+        from app import webhooks
+        asyncio.create_task(webhooks.consultar_shipments_async(db))
+        print("[TOKEN] Token definido - Iniciando busca inicial de shipments em background")
+    except Exception as e:
+        print(f"[TOKEN] Erro ao agendar busca inicial: {e}")
 
     return RedirectResponse(url="/dashboard", status_code=303)
 
@@ -126,7 +105,203 @@ async def proxy_shipments(request: Request, status: str = 'posted'):
         raise HTTPException(status_code=500, detail=f"Erro ao conectar com o Melhor Envio: {str(e)}")
 
 
-        
-            
-   
-          
+@router.post('/monitoramento/iniciar')
+async def iniciar_monitoramento_endpoint(request: Request, interval_minutes: int = 10):
+    """
+    Inicia o monitoramento automático de shipments
+    """
+    from app import webhooks
+    try:
+        webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=request.app.state.db)
+        return {"message": f"Monitoramento iniciado com intervalo de {interval_minutes} minutos"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao iniciar monitoramento: {str(e)}")
+
+
+@router.post('/monitoramento/parar')
+async def parar_monitoramento_endpoint():
+    """
+    Para o monitoramento automático de shipments
+    """
+    from app import webhooks
+    try:
+        webhooks.parar_monitoramento()
+        return {"message": "Monitoramento parado com sucesso"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao parar monitoramento: {str(e)}")
+
+
+@router.get('/monitoramento/status')
+async def status_monitoramento():
+    """
+    Verifica o status do monitoramento
+    """
+    from app import webhooks
+    try:
+        running = webhooks.scheduler is not None and webhooks.scheduler.running
+        return {
+            "running": running,
+            "message": "Monitoramento ativo" if running else "Monitoramento inativo"
+        }
+    except Exception as e:
+        return {"running": False, "message": f"Erro ao verificar status: {str(e)}"}
+
+
+@router.post('/shipments/consultar')
+async def consultar_shipments_manual(request: Request):
+    """
+    Agendar consulta manual de shipments (fora do cron) em background e retornar imediatamente.
+    """
+    from app import webhooks
+    try:
+        # Agendar a execução assíncrona em background
+        asyncio.create_task(webhooks.consultar_shipments_async(request.app.state.db))
+        return {"message": "Consulta de shipments agendada em background"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao agendar consulta: {str(e)}")
+
+
+@router.get('/shipments/view')
+async def view_shipments(request: Request):
+    """
+    Visualiza shipments com dados de rastreio do banco
+    """
+    from app import webhooks
+    try:
+        shipments = webhooks.get_shipments_for_api()
+        return {"shipments": shipments}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar shipments: {str(e)}")
+
+
+@router.get('/shipments/ativos')
+async def get_shipments_ativos(request: Request):
+    """
+    Retorna todos os shipments ativos do banco de dados com suas informações de rastreio
+    """
+    # Usar a função que já obtém os shipments do Melhor Envio e injeta o rastreio do DB
+    from app import webhooks
+    try:
+        db = request.app.state.db
+        melhores_shipments = webhooks.get_shipments_for_api(db)
+        result = []
+
+        for s in melhores_shipments:
+            shipment_id = s.get('id')
+            if not shipment_id:
+                continue
+
+            # Nome/telefone preferencialmente do DB (se existir), senão do objeto retornado
+            key = f"etiqueta:{shipment_id}".encode('utf-8')
+            stored = db.get(key)
+            nome = None
+            telefone = None
+            rastreio_completo = None
+            if stored:
+                try:
+                    d = json.loads(stored.decode('utf-8'))
+                    nome = d.get('nome')
+                    telefone = d.get('telefone')
+                    rastreio_completo = d.get('rastreio_detalhado')
+                except Exception:
+                    pass
+
+            if not nome:
+                nome = s.get('to', {}).get('name', 'N/A')
+            if not telefone:
+                telefone = s.get('to', {}).get('phone', 'N/A')
+            if not rastreio_completo:
+                rastreio_completo = s.get('rastreio_detalhado', 'Ainda não processado')
+
+            # Tentar montar campos adicionais para o frontend (JSON stringificado, HTML e mensagem WhatsApp)
+            rastreio_json = None
+            rastreio_html = None
+            rastreio_whatsapp = None
+            try:
+                from app import webhooks as webhooks_module
+                if stored:
+                    # usar o objeto salvo no DB
+                    rast_obj = d.get('rastreio_detalhado')
+                else:
+                    rast_obj = s.get('rastreio_detalhado')
+
+                if rast_obj and isinstance(rast_obj, (dict, list)):
+                    try:
+                        rastreio_json = json.dumps(rast_obj, ensure_ascii=False, indent=2)
+                    except Exception:
+                        rastreio_json = str(rast_obj)
+
+                    try:
+                        rastreio_html = webhooks_module.formatar_rastreio_para_painel(rast_obj)
+                    except Exception:
+                        rastreio_html = None
+
+                    try:
+                        rastreio_whatsapp = webhooks_module.formatar_rastreio_para_whatsapp(rast_obj)
+                    except Exception:
+                        rastreio_whatsapp = None
+            except Exception:
+                # Se falhar, deixar campos como None
+                rastreio_json = rastreio_json or None
+
+            result.append({
+                'id': shipment_id,
+                'nome': nome,
+                'telefone': telefone,
+                'rastreio_completo': rastreio_completo,
+                'rastreio_json': rastreio_json or 'Ainda não processado',
+                'rastreio_html': rastreio_html or '<p>Ainda não processado</p>',
+                'rastreio_whatsapp': rastreio_whatsapp or 'Ainda não processado',
+                'tracking': s.get('tracking', ''),
+                'status': s.get('status', 'ativo')
+            })
+
+        return {"shipments": result, "total": len(result)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar shipments do Melhor Envio: {str(e)}")
+
+
+@router.post("/config/interval_minutes")
+async def set_interval_minutes(request: Request, interval_minutes: int = Form(...)):
+    """
+    Define o intervalo de minutos para o monitoramento automático
+    """
+    if interval_minutes < 2 or interval_minutes > 60:
+        raise HTTPException(status_code=400, detail="Intervalo deve ser entre 2 e 60 minutos")
+
+    db = request.app.state.db
+    key = b"config:interval_minutes"
+    db.set(key, str(interval_minutes).encode('utf-8'))
+
+    # Reiniciar o monitoramento com o novo intervalo
+    try:
+        from app import webhooks
+        webhooks.parar_monitoramento()
+        webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=db)
+        print(f"[CONFIG] Intervalo de monitoramento alterado para {interval_minutes} minutos")
+    except Exception as e:
+        print(f"[CONFIG] Erro ao reiniciar monitoramento: {e}")
+
+    return {"message": f"Intervalo definido para {interval_minutes} minutos"}
+
+
+@router.get("/config/interval_minutes")
+async def get_interval_minutes(request: Request):
+    """
+    Retorna o intervalo atual de minutos para o monitoramento
+    """
+    db = request.app.state.db
+    key = b"config:interval_minutes"
+    config = db.get(key)
+
+    if config:
+        try:
+            interval_minutes = int(config.decode('utf-8'))
+        except (ValueError, UnicodeDecodeError):
+            interval_minutes = 30
+    else:
+        interval_minutes = 30
+
+    return {"interval_minutes": interval_minutes}
+
+

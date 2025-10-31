@@ -18,7 +18,7 @@
                 </div>
                 
                 <div class="row mt-4">
-                    <div class="col-md-4">
+                    <div class="col-md-6">
                         <div class="card bg-primary text-white">
                             <div class="card-body">
                                 <h5 class="card-title">Gestão de Token</h5>
@@ -27,7 +27,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-6">
                         <div class="card bg-success text-white">
                             <div class="card-body">
                                 <h5 class="card-title">Envios Ativos</h5>
@@ -36,12 +36,28 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4">
-                        <div class="card bg-info text-white">
+                </div>
+
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">Configurações de Monitoramento</h5>
+                            </div>
                             <div class="card-body">
-                                <h5 class="card-title">Relatórios</h5>
-                                <p class="card-text">Em breve: relatórios e estatísticas de envios.</p>
-                                <button class="btn btn-light" disabled>Em breve</button>
+                                <form id="intervalForm" method="post" action="/api/config/interval_minutes">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <label for="interval_minutes" class="form-label">Intervalo de Monitoramento (minutos)</label>
+                                            <input type="number" class="form-control" id="interval_minutes" name="interval_minutes"
+                                                   min="2" max="60" required>
+                                            <div class="form-text">Intervalo entre verificações automáticas (2-60 minutos)</div>
+                                        </div>
+                                        <div class="col-md-6 d-flex align-items-end">
+                                            <button type="submit" class="btn btn-primary">Salvar Configuração</button>
+                                        </div>
+                                    </div>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -50,4 +66,40 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Carregar o valor atual do intervalo
+    fetch('/api/config/interval_minutes')
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('interval_minutes').value = data.interval_minutes;
+        })
+        .catch(error => {
+            console.error('Erro ao carregar configuração:', error);
+        });
+
+    // Manipular o envio do formulário
+    document.getElementById('intervalForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(this);
+        const intervalValue = formData.get('interval_minutes');
+
+        fetch('/api/config/interval_minutes', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert('Configuração salva com sucesso! O monitoramento será reiniciado com o novo intervalo.');
+            // Recarregar a página para mostrar as mudanças
+            window.location.reload();
+        })
+        .catch(error => {
+            alert('Erro ao salvar configuração: ' + error.message);
+        });
+    });
+});
+</script>
 {% endblock %}

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from .api import get_current_user
 import os
-import rocksdbpy
+import bcrypt
+
 router = APIRouter()
 
 # Determina diretório de templates relativo ao package
@@ -17,6 +18,35 @@ async def render_login_template(request: Request):
     Renderiza a página de login.
     """
     return templates.TemplateResponse("login.html", {"request": request})
+
+@router.post("/login")
+async def process_login(request: Request, username: str = Form(...), password: str = Form(...)):
+    """
+    Processa o login do usuário usando o RocksDB armazenado em request.app.state.db.
+    Retorna JSON com status.
+    """
+    db = request.app.state.db
+    # Recupera senha armazenada (bytes) para a chave user:<username>
+    key = b"user:" + username.encode('utf-8')
+    stored = db.get(key)
+    
+    print(f"[DEBUG] Tentativa de login - Username: {username}")
+    print(f"[DEBUG] Senha encontrada no DB: {stored is not None}")
+    
+    if not stored:
+        print(f"[DEBUG] Usuário {username} não encontrado")
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
+
+    # stored é o hash bcrypt (bytes)
+    if bcrypt.checkpw(password.encode('utf-8'), stored):
+        # Login bem-sucedido: armazenar na sessão e redirecionar
+        print(f"[DEBUG] Login bem-sucedido para {username}")
+        request.session["user"] = username
+        print(f"[DEBUG] Sessão após login: {request.session.get('user')}")
+        return RedirectResponse(url="/dashboard", status_code=303)
+    else:
+        print(f"[DEBUG] Senha incorreta para {username}")
+        raise HTTPException(status_code=401, detail="Credenciais inválidas")
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def render_dashboard_template(request: Request, current_user: str = Depends(get_current_user)):

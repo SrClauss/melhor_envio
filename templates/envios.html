@@ -90,11 +90,9 @@ function displayEnvios(envios) {
                 <thead class="table-dark">
                     <tr>
                         <th>ID</th>
-                        <th>Status</th>
                         <th>Destinatário</th>
-                        <th>Cidade</th>
-                        <th>Serviço</th>
-                        <th>Valor</th>
+                        <th>Telefone</th>
+                        <th>Status Completo</th>
                         <th>Ações</th>
                     </tr>
                 </thead>
@@ -102,25 +100,22 @@ function displayEnvios(envios) {
     `;
 
     envios.shipments.forEach(envio => {
-        const statusBadge = getStatusBadge(envio.status);
         html += `
             <tr>
                 <td><code>${envio.id || 'N/A'}</code></td>
-                <td>${statusBadge}</td>
-                <td>${envio.to?.name || 'N/A'}</td>
-                <td>${envio.to?.city || 'N/A'} - ${envio.to?.state_abbr || ''}</td>
-                <td><small>${envio.service?.name || 'N/A'}</small></td>
-                <td><strong>R$ ${envio.price || '0,00'}</strong></td>
+                <td>${envio.nome || 'N/A'}</td>
+                <td><small>${envio.telefone || 'N/A'}</small></td>
                 <td>
-                    <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-primary btn-sm" onclick="viewDetails('${envio.id}')">
+                    <button class="btn btn-sm btn-outline-info" onclick="openRastreioModal('${envio.id}')">Ver status</button>
+                </td>
+                <td>
+                    <div class="btn-group btn-group-sm align-items-center">
+                        <button class="btn btn-outline-primary btn-sm" onclick="openRastreioModal('${envio.id}')">
                             <i class="bi bi-eye"></i>
                         </button>
-                        ${envio.tracking ? `
-                        <button class="btn btn-outline-info btn-sm" onclick="copyTracking('${envio.tracking}')">
-                            <i class="bi bi-clipboard"></i>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="copyTrackingById('${envio.id}')">
+                            ${envio.tracking || envio.rastreio_completo || ''}
                         </button>
-                        ` : ''}
                     </div>
                 </td>
             </tr>
@@ -141,58 +136,55 @@ function displayEnvios(envios) {
     
     container.innerHTML = html;
 }
-
-function getStatusBadge(status) {
-    const statusMap = {
-        'posted': 'success',
-        'pending': 'warning', 
-        'canceled': 'danger',
-        'delivered': 'info'
-    };
-    const badgeClass = statusMap[status] || 'secondary';
-    return `<span class="badge bg-${badgeClass}">${status}</span>`;
-}
-
-function viewDetails(envioId) {
-    // Encontrar o envio nos dados carregados
+// Abre modal com JSON do rastreio e a mensagem WhatsApp gerada
+function openRastreioModal(envioId) {
     const envio = enviosAtivos.shipments?.find(e => e.id == envioId);
-    if (envio) {
-        const modalBody = `
-            <div class="row">
-                <div class="col-md-6">
-                    <h6>Informações do Envio</h6>
-                    <p><strong>ID:</strong> ${envio.id}</p>
-                    <p><strong>Status:</strong> ${getStatusBadge(envio.status)}</p>
-                    <p><strong>Valor:</strong> R$ ${envio.price}</p>
-                    ${envio.tracking ? `<p><strong>Rastreio:</strong> ${envio.tracking}</p>` : ''}
-                </div>
-                <div class="col-md-6">
-                    <h6>Destinatário</h6>
-                    <p><strong>Nome:</strong> ${envio.to?.name || 'N/A'}</p>
-                    <p><strong>Endereço:</strong> ${envio.to?.address || 'N/A'}</p>
-                    <p><strong>Cidade:</strong> ${envio.to?.city || 'N/A'} - ${envio.to?.state_abbr || ''}</p>
-                    <p><strong>CEP:</strong> ${envio.to?.postal_code || 'N/A'}</p>
-                </div>
-            </div>
-        `;
-        
-        // Criar modal dinamicamente (você pode melhorar isso)
-        alert('Detalhes do envio:\n' + JSON.stringify(envio, null, 2));
+    if (!envio) return;
+
+    // preencher campos do modal
+    const jsonPre = document.getElementById('rastreioJsonPre');
+    const whatsappDiv = document.getElementById('rastreioWhatsappText');
+    const htmlDiv = document.getElementById('rastreioHtmlContainer');
+
+    // JSON stringizado (campo `rastreio_json` vindo da API). Se não existir, stringify do objeto bruto
+    if (envio.rastreio_json && envio.rastreio_json !== 'Ainda não processado' && envio.rastreio_json !== 'Erro ao ler dados de rastreio') {
+        jsonPre.textContent = envio.rastreio_json;
+    } else {
+        try {
+            jsonPre.textContent = JSON.stringify(envio.rastreio_detalhado || envio.rastreio_completo || {}, null, 2);
+        } catch(e) {
+            jsonPre.textContent = String(envio.rastreio_detalhado || envio.rastreio_completo || 'Sem dados');
+        }
     }
+
+    whatsappDiv.textContent = envio.rastreio_whatsapp || 'Mensagem não disponível';
+
+    // HTML formatado (campo rastreio_html) - inserir como HTML seguro
+    if (envio.rastreio_html) {
+        htmlDiv.innerHTML = envio.rastreio_html;
+    } else {
+        htmlDiv.innerHTML = '<p>Sem visualização HTML</p>';
+    }
+
+    // mostrar modal (Bootstrap)
+    const modalEl = document.getElementById('rastreioModal');
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
 }
 
-function copyTracking(tracking) {
+function copyTrackingById(envioId) {
+    const envio = enviosAtivos.shipments?.find(e => e.id == envioId);
+    if (!envio) return;
+    const tracking = envio.tracking || envio.rastreio_completo || '';
+    if (!tracking) return;
     navigator.clipboard.writeText(tracking).then(() => {
-        // Mostrar toast de sucesso (simplificado)
         alert('Código de rastreio copiado: ' + tracking);
     });
 }
 
-async function getEnviosAtivos(status) {
+async function getEnviosAtivos() {
     try {
-        const resp = await axios.get('/api/melhorenvio/shipments', {
-            params: { status: status }
-        });
+        const resp = await axios.get('/api/shipments/ativos');
         return resp.data;
     } catch(err) {
         console.error('Erro ao buscar envios:', err);
@@ -204,7 +196,7 @@ async function inicializar() {
     showLoading();
     
     try {
-        const envios = await getEnviosAtivos('posted');
+        const envios = await getEnviosAtivos();
         enviosAtivos = envios;
         
         // Atualizar dados brutos para debug
@@ -215,7 +207,7 @@ async function inicializar() {
         
     } catch(err) {
         console.error('Erro:', err);
-        showError(err?.response?.data?.error || err?.message || 'Erro desconhecido ao carregar envios');
+        showError(err?.response?.data?.detail || err?.message || 'Erro desconhecido ao carregar envios');
         
         // Mostrar dados de erro no debug
         document.getElementById('enviosData').textContent = JSON.stringify({
@@ -230,6 +222,48 @@ async function inicializar() {
 // Auto-inicializar quando a página carregar
 document.addEventListener('DOMContentLoaded', function() {
     // Não carregar automaticamente, deixar o usuário clicar
+});
+</script>
+<!-- Modal para visualizar JSON / WhatsApp / HTML do rastreio -->
+<div class="modal fade" id="rastreioModal" tabindex="-1" aria-labelledby="rastreioModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="rastreioModalLabel">Detalhes do Rastreio</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <h6>Mensagem para WhatsApp</h6>
+                    <div id="rastreioWhatsappText" style="white-space: pre-wrap; background:#f8f9fa; padding:10px; border-radius:4px;"></div>
+                </div>
+
+                <div class="mb-3">
+                    <h6>Visualização (painel)</h6>
+                    <div id="rastreioHtmlContainer"></div>
+                </div>
+
+                <div>
+                    <h6>JSON bruto / stringify</h6>
+                    <pre id="rastreioJsonPre" style="background:#212529; color:#f8f9fa; padding:10px; border-radius:4px; max-height:400px; overflow:auto;"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                <button type="button" class="btn btn-primary" id="copyWhatsappBtn">Copiar mensagem WhatsApp</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Copiar mensagem para clipboard
+document.getElementById('copyWhatsappBtn').addEventListener('click', function(){
+        const texto = document.getElementById('rastreioWhatsappText').textContent || '';
+        if (!texto) return;
+        navigator.clipboard.writeText(texto).then(() => {
+                alert('Mensagem copiada para a área de transferência');
+        });
 });
 </script>
 {% endblock %}
