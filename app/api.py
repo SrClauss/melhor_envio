@@ -5,6 +5,7 @@ from fastapi.responses import RedirectResponse
 import requests
 from fastapi.responses import JSONResponse
 import asyncio
+from datetime import datetime
 
 def get_current_user(request: Request):
     """
@@ -307,17 +308,21 @@ async def get_interval_minutes(request: Request):
 
 
 @router.post('/config/monitor_hours')
-async def set_monitor_hours(request: Request, start_hour: int = Form(...), end_hour: int = Form(...)):
+async def set_monitor_hours(request: Request, start_hour: str = Form(...), end_hour: str = Form(...)):
     """
     Define o intervalo de horas (start_hour inclusive, end_hour exclusive) em que o monitor deve executar.
-    Valores esperados: start_hour 0-23, end_hour 1-24, end_hour > start_hour normalmente.
+    Valores esperados: start_hour e end_hour no formato HH:MM.
     """
-    if not (0 <= start_hour <= 23) or not (1 <= end_hour <= 24):
-        raise HTTPException(status_code=400, detail="Horas devem estar no intervalo 0-23 (start) e 1-24 (end)")
+    try:
+        # Validar e converter os horários para o formato correto
+        datetime.strptime(start_hour, '%H:%M')
+        datetime.strptime(end_hour, '%H:%M')
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Horas devem estar no formato HH:MM")
 
     db = request.app.state.db
-    db.set(b"config:monitor_start_hour", str(int(start_hour)).encode('utf-8'))
-    db.set(b"config:monitor_end_hour", str(int(end_hour)).encode('utf-8'))
+    db.set(b"config:monitor_start_hour", start_hour.encode('utf-8'))
+    db.set(b"config:monitor_end_hour", end_hour.encode('utf-8'))
 
     # Reiniciar o monitoramento para aplicar imediatamente (se ativo)
     try:
@@ -327,7 +332,7 @@ async def set_monitor_hours(request: Request, start_hour: int = Form(...), end_h
     except Exception as e:
         print(f"[CONFIG] Erro ao reiniciar monitoramento após alterar horas: {e}")
 
-    return {"message": f"Horas de monitoramento definidas: {start_hour}:00 - {end_hour}:00"}
+    return {"message": f"Horas de monitoramento definidas: {start_hour} - {end_hour}"}
 
 
 @router.get('/config/monitor_hours')
@@ -337,10 +342,29 @@ async def get_monitor_hours(request: Request):
     start = db.get(b"config:monitor_start_hour")
     end = db.get(b"config:monitor_end_hour")
     try:
-        start_hour = int(start.decode('utf-8')) if start else int(os.getenv('MONITOR_START_HOUR', 6))
-        end_hour = int(end.decode('utf-8')) if end else int(os.getenv('MONITOR_END_HOUR', 18))
+        if start:
+            start_hour = start.decode('utf-8')
+            # Se for um número inteiro (formato antigo), converter para HH:MM
+            try:
+                int(start_hour)
+                start_hour = f"{int(start_hour):02d}:00"
+            except ValueError:
+                pass  # Já está no formato HH:MM
+        else:
+            start_hour = os.getenv('MONITOR_START_HOUR', '06:00')
+            
+        if end:
+            end_hour = end.decode('utf-8')
+            # Se for um número inteiro (formato antigo), converter para HH:MM
+            try:
+                int(end_hour)
+                end_hour = f"{int(end_hour):02d}:00"
+            except ValueError:
+                pass  # Já está no formato HH:MM
+        else:
+            end_hour = os.getenv('MONITOR_END_HOUR', '18:00')
     except Exception:
-        start_hour, end_hour = 6, 18
+        start_hour, end_hour = '06:00', '18:00'
 
     return {"start_hour": start_hour, "end_hour": end_hour}
 

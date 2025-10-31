@@ -63,11 +63,11 @@
                                     <div class="row">
                                         <div class="col-md-3">
                                             <label for="start_hour" class="form-label">Início do Monitoramento (hora)</label>
-                                            <input type="number" class="form-control" id="start_hour" name="start_hour" min="0" max="23" required>
+                                            <input type="time" class="form-control" id="start_hour" name="start_hour" required>
                                         </div>
                                         <div class="col-md-3">
                                             <label for="end_hour" class="form-label">Fim do Monitoramento (hora)</label>
-                                            <input type="number" class="form-control" id="end_hour" name="end_hour" min="1" max="24" required>
+                                            <input type="time" class="form-control" id="end_hour" name="end_hour" required>
                                         </div>
                                         <div class="col-md-6 d-flex align-items-end">
                                             <button type="submit" class="btn btn-secondary">Salvar Horário</button>
@@ -130,6 +130,13 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('hoursForm').addEventListener('submit', function(e) {
         e.preventDefault();
         const form = new FormData(this);
+
+        // Logar os valores enviados para depuração
+        console.log('Enviando horários:', {
+            start_hour: form.get('start_hour'),
+            end_hour: form.get('end_hour')
+        });
+
         fetch('/api/config/monitor_hours', {
             method: 'POST',
             body: form
@@ -140,6 +147,7 @@ document.addEventListener('DOMContentLoaded', function() {
             window.location.reload();
         })
         .catch(err => {
+            console.error('Erro ao salvar horário:', err);
             alert('Erro ao salvar horário: ' + err.message);
         });
     });

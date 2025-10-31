@@ -55,208 +55,160 @@ def normalize_next_interval(interval: MinutesInterval) -> str:
     return next_time.strftime("%Y-%m-%d %H:%M Local")
 
 
-def formatar_rastreio_para_whatsapp(rastreio_data):
+def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=None):
     """
-    Formata dados de rastreio JSON em texto legível para WhatsApp
+    Formata dados de rastreio em mensagem unificada estilo Magalu.
+    Funciona tanto para WhatsApp quanto para painel.
+    
+    Args:
+        rastreio_data: Dados do rastreio da API GraphQL
+        shipment_data: Dados da etiqueta do Melhor Envio (opcional)
+        cliente_nome: Nome do cliente (opcional)
     """
     if isinstance(rastreio_data, dict):
         if 'erro' in rastreio_data:
             return f"❌ Erro: {rastreio_data['erro']}"
         
-        if 'ultimo_evento' in rastreio_data:
-            # Montar uma string mais completa usando campos principais (formato BR)
-            codigo = rastreio_data.get('codigo_original') or rastreio_data.get('codigo_interno') or ''
-            status_atual = rastreio_data.get('status_atual') or ''
-            consulta = rastreio_data.get('consulta_realizada_em') or ''
-            evento = rastreio_data['ultimo_evento']
-
-            def _format_data_br(dt_raw):
-                if not dt_raw:
-                    return 'Data desconhecida'
-                # esperado formato ISO: YYYY-MM-DDTHH:MM:SS(.sss)Z
-                try:
-                    part_date, part_time = dt_raw.split('T')
-                    time_part = part_time.replace('Z', '')
-                    hhmm = time_part.split(':')[:2]
-                    hhmm = ':'.join(hhmm)
-                    yyyy, mm, dd = part_date.split('-')
-                    return f"{dd}/{mm}/{yyyy} {hhmm}"
-                except Exception:
-                    # fallback simples
-                    return dt_raw.replace('T', ' ').replace('Z', '')[:16]
-
-            # Data/hora amigável
-            data_raw = evento.get('data_registro') or evento.get('data_criacao') or ''
-            data_amigavel = _format_data_br(data_raw)
-
-            titulo = evento.get('titulo') or evento.get('descricao') or 'Evento'
-            origem = evento.get('origem') or ''
-            destino = evento.get('destino') or ''
-            localizacao = evento.get('localizacao') or ''
-            rota = evento.get('rota') or ''
-
-            linhas = []
-            if codigo:
-                linhas.append(f"📦 Rastreio: {codigo}")
-            if status_atual:
-                linhas.append(f"Status: {status_atual}")
-            linhas.append(f"Última atualização: {data_amigavel}")
-
-            detalhe = titulo
-            if origem or destino or rota:
-                partes = []
-                if origem:
-                    partes.append(origem)
-                if destino:
-                    partes.append(destino)
-                if rota and not (origem or destino):
-                    partes.append(rota)
-                if partes:
-                    detalhe += " — " + " → ".join([p for p in partes if p])
-
-            if localizacao:
-                detalhe += f" ({localizacao})"
-
-            linhas.append(f"• {detalhe}")
-
-            if consulta:
-                linhas.append(f"Consulta em: {_format_data_br(consulta)}")
-
-            # Adicionar link amigável para rastreio (se tivermos o código)
-            if codigo:
-                linhas.append("")
-                linhas.append(f"Ver rastreio: https://melhorrastreio.com.br/{codigo}")
-
-            # Mensagem final, adequada para envio via WhatsApp no Brasil
-            return "\n".join(linhas)
+        # Extrair nome do cliente (primeiro nome apenas) e formatar corretamente
+        nome_cliente = ""
+        if cliente_nome:
+            primeiro_nome = cliente_nome.split()[0] if cliente_nome.split() else ""
+            # Converter para título (primeira letra maiúscula, resto minúscula)
+            nome_cliente = primeiro_nome.title() if primeiro_nome else ""
+        elif shipment_data and shipment_data.get('to', {}).get('name'):
+            nome_completo = shipment_data['to']['name']
+            primeiro_nome = nome_completo.split()[0] if nome_completo.split() else ""
+            # Converter para título (primeira letra maiúscula, resto minúscula)
+            nome_cliente = primeiro_nome.title() if primeiro_nome else ""
         
-        eventos = rastreio_data.get('eventos', [])
-        if not eventos:
+        # Obter código de rastreio
+        codigo_rastreio = ""
+        if rastreio_data.get('codigo_original'):
+            codigo_rastreio = rastreio_data['codigo_original']
+        elif rastreio_data.get('codigo_interno'):
+            codigo_rastreio = rastreio_data['codigo_interno']
+        elif shipment_data and shipment_data.get('tracking'):
+            codigo_rastreio = shipment_data['tracking']
+
+        def _format_data_br(dt_raw):
+            """Formata data no padrão brasileiro com hora"""
+            if not dt_raw:
+                return 'Data desconhecida'
+            try:
+                part_date, part_time = dt_raw.split('T')
+                time_part = part_time.replace('Z', '')
+                hhmm = time_part.split(':')[:2]
+                hhmm = ':'.join(hhmm)
+                yyyy, mm, dd = part_date.split('-')
+                return f"{dd}/{mm}/{yyyy} às {hhmm}"
+            except Exception:
+                return dt_raw.replace('T', ' ').replace('Z', '')[:16]
+
+        # Montar mensagem baseada nos eventos
+        if 'ultimo_evento' in rastreio_data:
+            evento = rastreio_data['ultimo_evento']
+        elif rastreio_data.get('eventos'):
+            evento = rastreio_data['eventos'][0]  # Primeiro evento (mais recente)
+        else:
             return "📦 Sem movimentação registrada"
 
-        # Se não houver 'ultimo_evento' explícito, usar o primeiro evento para montar a mensagem
-        if eventos:
-            primeiro = eventos[0]
-            # Tentar extrair mesmos campos usados quando 'ultimo_evento' existe
-            codigo = rastreio_data.get('codigo_original') or rastreio_data.get('codigo_interno') or ''
-            status_atual = rastreio_data.get('status_atual') or ''
-            consulta = rastreio_data.get('consulta_realizada_em') or ''
+        # Extrair informações do evento
+        data_raw = evento.get('data_registro') or evento.get('data_criacao') or ''
+        data_formatada = _format_data_br(data_raw)
+        titulo = evento.get('titulo') or evento.get('descricao') or 'Movimentação registrada'
+        localizacao = evento.get('localizacao') or ''
+        origem = evento.get('origem') or ''
+        destino = evento.get('destino') or ''
+        rota = evento.get('rota') or ''
 
-            def _format_data_br(dt_raw):
-                if not dt_raw:
-                    return 'Data desconhecida'
-                try:
-                    part_date, part_time = dt_raw.split('T')
-                    time_part = part_time.replace('Z', '')
-                    hhmm = time_part.split(':')[:2]
-                    hhmm = ':'.join(hhmm)
-                    yyyy, mm, dd = part_date.split('-')
-                    return f"{dd}/{mm}/{yyyy} {hhmm}"
-                except Exception:
-                    return dt_raw.replace('T', ' ').replace('Z', '')[:16]
+        # Construir mensagem estilo Magalu
+        linhas = []
+        
+        # Saudação personalizada
+        if nome_cliente:
+            linhas.append(f"{nome_cliente},")
+            linhas.append("")
+            linhas.append(f"Tô passando pra avisar que sua encomenda movimentou! 📦")
+        else:
+            linhas.append("Olá!")
+            linhas.append("")
+            linhas.append("Tô passando pra avisar que sua encomenda movimentou! 📦")
+        
+        linhas.append("")
+        
+        # Status atual
+        emoji_status = '📦'
+        if titulo:
+            if 'transferencia' in titulo.lower() or 'transferência' in titulo.lower():
+                emoji_status = '🔄'
+            elif 'entrega' in titulo.lower():
+                emoji_status = '🚚'
+            elif 'postado' in titulo.lower() or 'postagem' in titulo.lower():
+                emoji_status = '📮'
+            elif 'trânsito' in titulo.lower() or 'transito' in titulo.lower():
+                emoji_status = '🚛'
+            elif 'saiu' in titulo.lower():
+                emoji_status = '📤'
+            elif 'chegou' in titulo.lower() or 'chegada' in titulo.lower():
+                emoji_status = '📥'
+            elif 'aguarde' in titulo.lower() or 'aguard' in titulo.lower():
+                emoji_status = '⏳'
+            elif 'entregue' in titulo.lower() or 'delivered' in titulo.lower():
+                emoji_status = '✅'
+        linhas.append(f"{emoji_status} {titulo}")
 
-            data_raw = primeiro.get('data_registro') or primeiro.get('data_criacao') or ''
-            data_amigavel = _format_data_br(data_raw)
+        # Localização se disponível
+        if localizacao:
+            linhas.append(f"📍 Localização: {localizacao}")
 
-            titulo = primeiro.get('titulo') or primeiro.get('descricao') or 'Evento'
-            origem = primeiro.get('origem') or ''
-            destino = primeiro.get('destino') or ''
-            localizacao = primeiro.get('localizacao') or ''
-            rota = primeiro.get('rota') or ''
+        # Rota se disponível
+        if origem or destino or rota:
+            partes = []
+            if origem:
+                partes.append(origem)
+            if destino:
+                partes.append(destino)
+            if rota and not (origem or destino):
+                partes.append(rota)
+            if partes:
+                linhas.append(f"🚛 Rota: {' → '.join([p for p in partes if p])}")
 
-            linhas = []
-            if codigo:
-                linhas.append(f"📦 Rastreio: {codigo}")
-            if status_atual:
-                linhas.append(f"Status: {status_atual}")
-            linhas.append(f"Última atualização: {data_amigavel}")
+        linhas.append("")
+        linhas.append(f"🕒 Última atualização: {data_formatada}")
+        linhas.append("")
+        
+        # Link para rastreio detalhado
+        if codigo_rastreio:
+            linhas.append("Você também pode acompanhar o pedido sempre que quiser pelo link: 👇")
+            linhas.append(f"https://melhorrastreio.com.br/{codigo_rastreio}")
+            linhas.append("")
+        
+        linhas.append("Mas pode deixar que assim que tiver alguma novidade, corro aqui pra te avisar! 🏃‍♀️")
+        linhas.append("")
+        linhas.append("⚠️ Ah, e atenção: nunca solicitamos pagamentos adicionais, dados ou senhas para finalizar a entrega.")
+        linhas.append("")
+        linhas.append("Se tiver dúvidas, entre em contato conosco.")
+        linhas.append("")
+        linhas.append("Até mais! 💙")
 
-            detalhe = titulo
-            if origem or destino or rota:
-                partes = []
-                if origem:
-                    partes.append(origem)
-                if destino:
-                    partes.append(destino)
-                if rota and not (origem or destino):
-                    partes.append(rota)
-                if partes:
-                    detalhe += " — " + " → ".join([p for p in partes if p])
-
-            if localizacao:
-                detalhe += f" ({localizacao})"
-
-            linhas.append(f"• {detalhe}")
-
-            if consulta:
-                linhas.append(f"Consulta em: {_format_data_br(consulta)}")
-
-            if codigo:
-                linhas.append("")
-                linhas.append(f"Ver rastreio: https://melhorrastreio.com.br/{codigo}")
-
-            return "\n".join(linhas)
-
-        # Formatar os 3 eventos mais recentes (fallback)
-        linhas = ["📦 Últimas atualizações do rastreio:"]
-        for evento in eventos[:3]:
-            data = evento.get('data_registro', '').split('T')[0] if evento.get('data_registro') else 'Data desconhecida'
-            titulo = evento.get('titulo') or evento.get('descricao') or 'Evento'
-            localizacao = evento.get('localizacao') or ''
-
-            linha = f"• {data}: {titulo}"
-            if localizacao:
-                linha += f" ({localizacao})"
-
-            linhas.append(linha)
-
-        return '\n'.join(linhas)
+        return "\n".join(linhas)
     
     # Fallback para outros tipos
     return str(rastreio_data)
 
 
-def formatar_rastreio_para_painel(rastreio_data):
+def formatar_rastreio_para_whatsapp(rastreio_data, shipment_data=None, cliente_nome=None):
     """
-    Formata dados de rastreio JSON em HTML legível para painel administrativo
+    Wrapper para compatibilidade - usa a função unificada
     """
-    if isinstance(rastreio_data, dict):
-        if 'erro' in rastreio_data:
-            return f"<p style='color: red;'>Erro: {rastreio_data['erro']}</p>"
-        
-        if 'ultimo_evento' in rastreio_data:
-            evento = rastreio_data['ultimo_evento']
-            data = evento.get('data_registro', '').split('T')[0] if evento.get('data_registro') else 'Data desconhecida'
-            titulo = evento.get('titulo') or evento.get('descricao') or 'Evento'
-            localizacao = evento.get('localizacao') or ''
-            origem = evento.get('origem') or ''
-            destino = evento.get('destino') or ''
-            
-            html = "<table border='1' style='border-collapse: collapse; width: 100%;'><thead><tr><th>Data</th><th>Status</th><th>Localização</th><th>Origem</th><th>Destino</th></tr></thead><tbody>"
-            html += f"<tr><td>{data}</td><td>{titulo}</td><td>{localizacao}</td><td>{origem}</td><td>{destino}</td></tr>"
-            html += "</tbody></table>"
-            return html
-        
-        eventos = rastreio_data.get('eventos', [])
-        if not eventos:
-            return "<p>Sem movimentação registrada</p>"
-        
-        # Formatar os 10 eventos mais recentes em tabela HTML
-        html = "<table border='1' style='border-collapse: collapse; width: 100%;'><thead><tr><th>Data</th><th>Status</th><th>Localização</th><th>Origem</th><th>Destino</th></tr></thead><tbody>"
-        for evento in eventos[:10]:
-            data = evento.get('data_registro', '').split('T')[0] if evento.get('data_registro') else 'Data desconhecida'
-            titulo = evento.get('titulo') or evento.get('descricao') or 'Evento'
-            localizacao = evento.get('localizacao') or ''
-            origem = evento.get('origem') or ''
-            destino = evento.get('destino') or ''
-            
-            html += f"<tr><td>{data}</td><td>{titulo}</td><td>{localizacao}</td><td>{origem}</td><td>{destino}</td></tr>"
-        
-        html += "</tbody></table>"
-        return html
-    
-    # Fallback para outros tipos
-    return str(rastreio_data)
+    return formatar_mensagem_rastreio(rastreio_data, shipment_data, cliente_nome)
+
+
+def formatar_rastreio_para_painel(rastreio_data, shipment_data=None, cliente_nome=None):
+    """
+    Wrapper para compatibilidade - usa a função unificada
+    """
+    return formatar_mensagem_rastreio(rastreio_data, shipment_data, cliente_nome)
 
 
 def extrair_rastreio_api(codigo_rastreio):
@@ -308,8 +260,8 @@ def enviar_para_whatsapp(mensagem, telefone):
     to_phone = f"+{digits}"
 
     payload = {
-        #"toPhone": to_phone,
-        "toPhone": "+5527998870163",
+        "toPhone": to_phone,
+        #"toPhone": "+5527998870163",
         "fromPhone": from_phone,
         "organizationId": organization_id,
         "message": mensagem,
@@ -503,7 +455,7 @@ def consultar_shipments(db=None):
             # Enviar notificação se necessário
             if should_notify:
                 try:
-                    mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado)
+                    mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
                     enviar_para_whatsapp(mensagem, telefone)
                     notifications_sent += 1
                     print(f"[WHATSAPP] Notificação enviada para {telefone}")
@@ -580,7 +532,7 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
     trigger = IntervalTrigger(minutes=interval_minutes)
     
     def _get_monitor_hours(job_db):
-        """Retorna tuple (start_hour, end_hour) lidos do DB ou .env com fallback 6-18."""
+        """Retorna tuple (start_hour, end_hour) lidos do DB ou .env com fallback 06:00-18:00."""
         try:
             if job_db is None:
                 job_db = rocksdbpy.open('database.db', rocksdbpy.Option())
@@ -589,20 +541,28 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
             start = job_db.get(start_key)
             end = job_db.get(end_key)
             if start:
-                start_hour = int(start.decode('utf-8'))
+                start_hour = start.decode('utf-8')
             else:
-                start_hour = int(os.getenv('MONITOR_START_HOUR', 6))
+                start_hour = os.getenv('MONITOR_START_HOUR', '06:00')
             if end:
-                end_hour = int(end.decode('utf-8'))
+                end_hour = end.decode('utf-8')
             else:
-                end_hour = int(os.getenv('MONITOR_END_HOUR', 18))
+                end_hour = os.getenv('MONITOR_END_HOUR', '18:00')
             # sanitize
-            start_hour = max(0, min(23, start_hour))
-            end_hour = max(0, min(24, end_hour))
+            start_hour = _sanitize_time_format(start_hour)
+            end_hour = _sanitize_time_format(end_hour)
             return start_hour, end_hour
         except Exception as e:
             print(f"[CRON] Erro ao ler horas de monitoramento: {e}")
-            return 6, 18
+            return '06:00', '18:00'
+
+    def _sanitize_time_format(time_str):
+        """Garante que o formato do horário seja HH:MM."""
+        try:
+            datetime.strptime(time_str, '%H:%M')
+            return time_str
+        except ValueError:
+            return '00:00'  # fallback para um valor padrão
 
     # Agendar um job que só executa as consultas dentro do horário permitido (configurável)
     async def _scheduled_job(job_db):
@@ -691,9 +651,10 @@ def get_shipments_for_api(db):
                     try:
                         stored_data = json.loads(existing_data.decode('utf-8'))
                         rastreio_data = stored_data.get('rastreio_detalhado', 'Sem dados de rastreio')
+                        nome_cliente = stored_data.get('nome', '') or shipment.get('to', {}).get('name', '')
                         shipment['rastreio_detalhado'] = rastreio_data
-                        shipment['rastreio_html'] = formatar_rastreio_para_painel(rastreio_data)
-                        shipment['rastreio_whatsapp'] = formatar_rastreio_para_whatsapp(rastreio_data)
+                        shipment['rastreio_html'] = formatar_rastreio_para_painel(rastreio_data, shipment, nome_cliente)
+                        shipment['rastreio_whatsapp'] = formatar_rastreio_para_whatsapp(rastreio_data, shipment, nome_cliente)
                         # JSON stringificado para exibir no painel (stringify)
                         try:
                             shipment['rastreio_json'] = json.dumps(rastreio_data, ensure_ascii=False, indent=2)
