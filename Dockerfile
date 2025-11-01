@@ -1,6 +1,9 @@
 FROM python:3.11-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=America/Sao_Paulo
+
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # Install system dependencies (keep minimal for smaller image)
 RUN apt-get update \
