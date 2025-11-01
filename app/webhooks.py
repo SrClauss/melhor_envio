@@ -520,11 +520,14 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
     """Inicia o monitoramento automático de shipments"""
     global scheduler
     
-    if scheduler and scheduler.running:
+    # Parar scheduler anterior se estiver rodando
+    if scheduler is not None:
         try:
-            scheduler.shutdown(wait=False)
+            if scheduler.running:
+                scheduler.shutdown(wait=False)
+                print("[CRON] Scheduler anterior parado")
         except Exception as e:
-            print(f"Erro ao parar scheduler anterior: {e}")
+            print(f"[CRON] Aviso ao parar scheduler anterior: {e}")
     
     scheduler = AsyncIOScheduler()
     
@@ -614,14 +617,17 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
 def parar_monitoramento():
     """Para o monitoramento automático"""
     global scheduler
-    if scheduler and scheduler.running:
+    if scheduler is not None:
         try:
-            scheduler.shutdown(wait=True)
-            print("[CRON] Monitoramento parado")
+            if scheduler.running:
+                scheduler.shutdown(wait=True)
+                print("[CRON] Monitoramento parado")
+            else:
+                print("[CRON] Scheduler já estava parado")
         except Exception as e:
-            print(f"Erro ao parar monitoramento: {e}")
+            print(f"[CRON] Erro ao parar monitoramento: {e}")
     else:
-        print("Scheduler não estava rodando")
+        print("[CRON] Scheduler não inicializado")
 
 
 def get_shipments_for_api(db):
