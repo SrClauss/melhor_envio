@@ -5,6 +5,7 @@ import requests
 import rocksdbpy
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 import json
 import asyncio
 from dotenv import load_dotenv
@@ -531,8 +532,15 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
     
     scheduler = AsyncIOScheduler()
     
-    # Usar IntervalTrigger com o intervalo especificado
-    trigger = IntervalTrigger(minutes=interval_minutes)
+    # Usar CronTrigger para alinhar nos minutos da hora (ex.: */30 => :00 e :30)
+    # Fallback para IntervalTrigger se algo der errado
+    try:
+        if interval_minutes == 60:
+            trigger = CronTrigger(minute=0)
+        else:
+            trigger = CronTrigger(minute=f"*/{interval_minutes}")
+    except Exception:
+        trigger = IntervalTrigger(minutes=interval_minutes)
     
     def _get_monitor_hours(job_db):
         """Retorna tuple (start_hour, end_hour) como inteiros de horas (0-24).
@@ -608,7 +616,19 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
         
         scheduler.start()
         print(f"[CRON] Monitoramento iniciado com intervalo de {interval_minutes} minutos")
-        print(f"[CRON] Próxima execução: {normalize_next_interval(interval_minutes)}")
+        # Exibir a próxima execução REAL do APScheduler
+        try:
+            job = scheduler.get_job('monitor_shipments')
+            if job and job.next_run_time:
+                next_run = job.next_run_time
+                # Converter para horário local, se for timezone-aware
+                try:
+                    next_run_str = next_run.astimezone().strftime('%Y-%m-%d %H:%M Local')
+                except Exception:
+                    next_run_str = next_run.strftime('%Y-%m-%d %H:%M') + ' Local'
+                print(f"[CRON] Próxima execução (real): {next_run_str}")
+        except Exception as e:
+            print(f"[CRON] Não foi possível obter próxima execução: {e}")
             
     except Exception as e:
         print(f"Erro ao iniciar monitoramento: {e}")
