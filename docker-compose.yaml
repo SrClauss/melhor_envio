@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  fastapi_app:
+    # Este ponto ( . ) diz ao Docker para procurar o Dockerfile no diretório atual
+    build: . 
+    
+    # Este é o mapeamento de portas: 
+    # Todo o tráfego que chegar na porta 80 do seu IP (46.202.148.152) 
+    # será redirecionado para a porta 8000 do contêiner (onde o Uvicorn roda)
+    ports:
+      - "80:8000"
+      
+    # Essencial para produção: Garante que o serviço reinicie 
+    # se o servidor for rebootado ou a aplicação falhar
+    restart: always

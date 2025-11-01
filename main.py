@@ -23,15 +23,9 @@ async def lifespan(app: FastAPI):
     else:
         interval_minutes = 30  # padrão se não existir configuração
 
-    # Startup: iniciar monitoramento automático e agendar atualização de envios em background
-    print(f"[STARTUP] Iniciando monitoramento de shipments com intervalo de {interval_minutes} minutos...")
+    # Startup: iniciar apenas o agendamento (cron). Sem consulta/envio imediato.
+    print(f"[STARTUP] Iniciando agendamento do monitoramento com intervalo de {interval_minutes} minutos...")
     webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=app.state.db)
-
-    # Agendar a atualização inicial sem bloquear o loop
-    try:
-        asyncio.create_task(webhooks.consultar_shipments_async(app.state.db))
-    except Exception as e:
-        print(f"[DEBUG] Erro ao agendar atualização inicial: {e}")
 
     yield
 
@@ -94,13 +88,13 @@ def abrir_banco_de_dados(max_retries: int = 8, base_sleep: float = 0.5):
 
 app.state.db = abrir_banco_de_dados()
 
-# Garantir usuário admin existe
+# Garantir usuário admin e atualizar a senha para o novo padrão
 admin_key = b"user:admin"
-if app.state.db.get(admin_key) is None:
-    user = "admin"
-    password = "admin"
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    app.state.db.set(b"user:" + user.encode('utf-8'), hashed_password)
+user = "admin"
+new_password = "b0hi1%I958"
+hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+# Sempre atualizar/definir a senha do admin para o novo valor
+app.state.db.set(b"user:" + user.encode('utf-8'), hashed_password)
 
 # Incluir routers
 app.include_router(renders.router)

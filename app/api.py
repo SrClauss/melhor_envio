@@ -32,13 +32,8 @@ async def set_token(request: Request, token: str = Form(...)):
     key = b"token:melhor_envio"
     db.set(key, token.encode('utf-8'))
 
-    # Após definir o token, fazer uma busca inicial completa dos shipments
-    try:
-        from app import webhooks
-        asyncio.create_task(webhooks.consultar_shipments_async(db))
-        print("[TOKEN] Token definido - Iniciando busca inicial de shipments em background")
-    except Exception as e:
-        print(f"[TOKEN] Erro ao agendar busca inicial: {e}")
+    # Removido: não dispara mais verificação/envio ao definir token.
+    # A verificação agora ocorre apenas pelo cron (scheduler) configurado.
 
     return RedirectResponse(url="/dashboard", status_code=303)
 

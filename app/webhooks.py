@@ -532,7 +532,9 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
     trigger = IntervalTrigger(minutes=interval_minutes)
     
     def _get_monitor_hours(job_db):
-        """Retorna tuple (start_hour, end_hour) lidos do DB ou .env com fallback 06:00-18:00."""
+        """Retorna tuple (start_hour, end_hour) como inteiros de horas (0-24).
+        Lê strings 'HH:MM' do DB/.env e converte para horas inteiras com fallback 06-18.
+        """
         try:
             if job_db is None:
                 job_db = rocksdbpy.open('database.db', rocksdbpy.Option())
@@ -548,13 +550,26 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
                 end_hour = end.decode('utf-8')
             else:
                 end_hour = os.getenv('MONITOR_END_HOUR', '18:00')
-            # sanitize
+            # sanitize e converter para inteiro (hora)
             start_hour = _sanitize_time_format(start_hour)
             end_hour = _sanitize_time_format(end_hour)
-            return start_hour, end_hour
+
+            try:
+                start_h = int(start_hour.split(':')[0])
+            except Exception:
+                start_h = 6
+            try:
+                end_h = int(end_hour.split(':')[0])
+            except Exception:
+                end_h = 18
+
+            # bounds
+            start_h = max(0, min(23, start_h))
+            end_h = max(1, min(24, end_h))
+            return start_h, end_h
         except Exception as e:
             print(f"[CRON] Erro ao ler horas de monitoramento: {e}")
-            return '06:00', '18:00'
+            return 6, 18
 
     def _sanitize_time_format(time_str):
         """Garante que o formato do horário seja HH:MM."""
