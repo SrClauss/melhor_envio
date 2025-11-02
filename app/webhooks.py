@@ -766,20 +766,37 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
         print(f"[CRON] Erro ao criar trigger, usando IntervalTrigger simples: {e}")
         trigger = IntervalTrigger(minutes=interval_minutes, timezone=TZ_UTC)
     
-    # Job que executa as consultas (ainda verifica horário como fallback, mas trigger já garante)
+    # Job que executa as consultas - verifica horário em BRASÍLIA
     async def _scheduled_job(job_db):
-        now = datetime.now(TZ_UTC)
-        hour = now.hour
-        start_hour, end_hour = _get_monitor_hours(job_db)
-        # Executar apenas entre start_hour (inclusive) e end_hour (exclusive)
-        if start_hour <= hour < end_hour:
+        now_utc = datetime.now(TZ_UTC)
+        now_brasilia = datetime.now(TZ_DISPLAY)
+        hour_brasilia = now_brasilia.hour
+        
+        # Ler horários UTC do banco e converter para Brasília
+        start_h_utc, end_h_utc = _get_monitor_hours(job_db)
+        
+        # Converter para Brasília
+        today_utc = now_utc.date()
+        start_dt_utc = datetime(today_utc.year, today_utc.month, today_utc.day, start_h_utc, 0, tzinfo=TZ_UTC)
+        end_dt_utc = datetime(today_utc.year, today_utc.month, today_utc.day, end_h_utc, 0, tzinfo=TZ_UTC)
+        
+        start_h_brt = start_dt_utc.astimezone(TZ_DISPLAY).hour
+        end_h_brt = end_dt_utc.astimezone(TZ_DISPLAY).hour
+        
+        print(f"[CRON] ⏰ Job disparado em {_fmt_local(now_utc)} (Brasília: {now_brasilia.strftime('%H:%M')})")
+        print(f"[CRON] Range permitido: {start_h_brt:02d}:00 - {end_h_brt:02d}:00 (Brasília)")
+        
+        # Executar apenas entre start_hour e end_hour EM HORÁRIO DE BRASÍLIA
+        if start_h_brt <= hour_brasilia < end_h_brt:
             try:
-                print(f"[CRON] Executando consulta de shipments em {_fmt_local(now)}")
+                print(f"[CRON] ✅ Dentro do horário permitido, executando consulta...")
                 await consultar_shipments_async(job_db)
             except Exception as e:
-                print(f"[CRON] Erro ao executar consultar_shipments_async: {e}")
+                print(f"[CRON] ❌ Erro ao executar consultar_shipments_async: {e}")
+                import traceback
+                traceback.print_exc()
         else:
-            print(f"[CRON] Pulando execução fora do horário ({_fmt_local(now)}) - permitido {start_hour:02d}:00-{end_hour:02d}:00")
+            print(f"[CRON] ⏭️  PULANDO: Hora atual {hour_brasilia:02d}:xx não está entre {start_h_brt:02d}:00-{end_h_brt:02d}:00 (Brasília)")
 
     try:
         sched.add_job(
