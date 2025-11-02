@@ -322,60 +322,79 @@ async def get_interval_minutes(request: Request):
 async def set_monitor_hours(request: Request, start_hour: str = Form(...), end_hour: str = Form(...)):
     """
     Define o intervalo de horas (start_hour inclusive, end_hour exclusive) em que o monitor deve executar.
-    Valores esperados: start_hour e end_hour no formato HH:MM.
+    Valores esperados: start_hour e end_hour no formato HH:MM em HORÁRIO DE BRASÍLIA.
+    
+    Converte Brasília -> UTC antes de salvar no banco.
     """
     try:
-        # Validar e converter os horários para o formato correto
+        # Validar formato
         datetime.strptime(start_hour, '%H:%M')
         datetime.strptime(end_hour, '%H:%M')
     except ValueError:
         raise HTTPException(status_code=400, detail="Horas devem estar no formato HH:MM")
 
+    # Converter Brasília -> UTC antes de salvar
+    from app import webhooks
+    start_hour_utc = webhooks._convert_brasilia_to_utc_hour(start_hour)
+    end_hour_utc = webhooks._convert_brasilia_to_utc_hour(end_hour)
+    
     db = request.app.state.db
-    db.set(b"config:monitor_start_hour", start_hour.encode('utf-8'))
-    db.set(b"config:monitor_end_hour", end_hour.encode('utf-8'))
+    db.set(b"config:monitor_start_hour", start_hour_utc.encode('utf-8'))
+    db.set(b"config:monitor_end_hour", end_hour_utc.encode('utf-8'))
 
     # Reagendar o job para aplicar imediatamente (se ativo)
     try:
-        from app import webhooks
         raw = db.get(b"config:interval_minutes")
         current_interval = int(raw.decode('utf-8')) if raw else 30
         next_run = webhooks.iniciar_monitoramento(interval_minutes=current_interval, db=db)
-        print(f"[CONFIG] Horas alteradas para {start_hour}-{end_hour} | Próxima: {next_run}")
+        print(f"[CONFIG] Horas alteradas para {start_hour} BRT ({start_hour_utc} UTC) - {end_hour} BRT ({end_hour_utc} UTC) | Próxima: {next_run}")
     except Exception as e:
         print(f"[CONFIG] Erro ao reiniciar monitoramento após alterar horas: {e}")
-    return {"message": f"Horas de monitoramento definidas: {start_hour} - {end_hour}", "next_run_time": next_run}
+        next_run = None
+    return {"message": f"Horas de monitoramento definidas: {start_hour} - {end_hour} (Brasília)", "next_run_time": next_run}
 
 
 @router.get('/config/monitor_hours')
 async def get_monitor_hours(request: Request):
-    """Retorna as horas de monitoramento configuradas (start_hour, end_hour)."""
+    """Retorna as horas de monitoramento configuradas em HORÁRIO DE BRASÍLIA.
+    
+    Lê do banco (UTC) e converte para Brasília antes de retornar.
+    """
+    from app import webhooks
+    
     db = request.app.state.db
     start = db.get(b"config:monitor_start_hour")
     end = db.get(b"config:monitor_end_hour")
+    
     try:
         if start:
-            start_hour = start.decode('utf-8')
+            start_hour_utc = start.decode('utf-8')
             # Se for um número inteiro (formato antigo), converter para HH:MM
             try:
-                int(start_hour)
-                start_hour = f"{int(start_hour):02d}:00"
+                int(start_hour_utc)
+                start_hour_utc = f"{int(start_hour_utc):02d}:00"
             except ValueError:
                 pass  # Já está no formato HH:MM
+            # Converter UTC -> Brasília
+            start_hour = webhooks._convert_utc_to_brasilia_hour(start_hour_utc)
         else:
-            start_hour = os.getenv('MONITOR_START_HOUR', '06:00')
+            start_hour = os.getenv('MONITOR_START_HOUR', '06:00')  # Padrão já em Brasília
             
         if end:
-            end_hour = end.decode('utf-8')
+            end_hour_utc = end.decode('utf-8')
             # Se for um número inteiro (formato antigo), converter para HH:MM
             try:
-                int(end_hour)
-                end_hour = f"{int(end_hour):02d}:00"
+                int(end_hour_utc)
+                end_hour_utc = f"{int(end_hour_utc):02d}:00"
             except ValueError:
                 pass  # Já está no formato HH:MM
+            # Converter UTC -> Brasília
+            end_hour = webhooks._convert_utc_to_brasilia_hour(end_hour_utc)
         else:
-            end_hour = os.getenv('MONITOR_END_HOUR', '18:00')
-    except Exception:
+            end_hour = os.getenv('MONITOR_END_HOUR', '18:00')  # Padrão já em Brasília
+    except Exception as e:
+        print(f"[API] Erro ao ler/converter horas: {e}")
+        start_hour, end_hour = '06:00', '18:00'
         start_hour, end_hour = '06:00', '18:00'
 
     return {"start_hour": start_hour, "end_hour": end_hour}

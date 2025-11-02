@@ -24,27 +24,66 @@ MinutesInterval = Literal[2, 10, 15, 20, 30, 45, 60, 120, 180, 240]
 
 # Scheduler global para monitoramento
 scheduler = None
-_tz_name = os.getenv('TZ', 'America/Sao_Paulo')
-TZ = ZoneInfo(_tz_name)
+
+# Timezone de exibição (Brasília) e UTC para scheduler/storage
+TZ_DISPLAY = ZoneInfo('America/Sao_Paulo')  # Para exibição e input do usuário
+TZ_UTC = ZoneInfo('UTC')  # Para o scheduler e storage no banco
 
 
 def _fmt_local(dt: datetime) -> str:
-    """Formata datetime em horário local com sufixo 'Local'."""
+    """Formata datetime em horário de Brasília com sufixo 'BRT/BRST'."""
     try:
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=TZ)
-        return dt.astimezone(TZ).strftime('%Y-%m-%d %H:%M Local')
+            # Se não tem timezone, assume UTC e converte para Brasília
+            dt = dt.replace(tzinfo=TZ_UTC)
+        return dt.astimezone(TZ_DISPLAY).strftime('%Y-%m-%d %H:%M %Z')
     except Exception:
-        return dt.strftime('%Y-%m-%d %H:%M') + ' Local'
+        return dt.strftime('%Y-%m-%d %H:%M')
+
+
+def _convert_brasilia_to_utc_hour(brasilia_hhmm: str) -> str:
+    """Converte horário HH:MM de Brasília para UTC e retorna HH:MM.
+    
+    Exemplo: '10:00' (BRT -03:00) -> '13:00' (UTC)
+    """
+    try:
+        hour, minute = map(int, brasilia_hhmm.split(':'))
+        # Criar datetime de hoje em Brasília
+        now_date = datetime.now(TZ_DISPLAY).date()
+        dt_brasilia = datetime(now_date.year, now_date.month, now_date.day, hour, minute, tzinfo=TZ_DISPLAY)
+        # Converter para UTC
+        dt_utc = dt_brasilia.astimezone(TZ_UTC)
+        return dt_utc.strftime('%H:%M')
+    except Exception as e:
+        print(f"[WARN] Erro ao converter Brasília->UTC '{brasilia_hhmm}': {e}")
+        return brasilia_hhmm  # Fallback
+
+
+def _convert_utc_to_brasilia_hour(utc_hhmm: str) -> str:
+    """Converte horário HH:MM de UTC para Brasília e retorna HH:MM.
+    
+    Exemplo: '13:00' (UTC) -> '10:00' (BRT -03:00)
+    """
+    try:
+        hour, minute = map(int, utc_hhmm.split(':'))
+        # Criar datetime de hoje em UTC
+        now_date = datetime.now(TZ_UTC).date()
+        dt_utc = datetime(now_date.year, now_date.month, now_date.day, hour, minute, tzinfo=TZ_UTC)
+        # Converter para Brasília
+        dt_brasilia = dt_utc.astimezone(TZ_DISPLAY)
+        return dt_brasilia.strftime('%H:%M')
+    except Exception as e:
+        print(f"[WARN] Erro ao converter UTC->Brasília '{utc_hhmm}': {e}")
+        return utc_hhmm  # Fallback
 
 
 def get_scheduler() -> AsyncIOScheduler:
     """Obtém (ou cria) um único scheduler global, já iniciado."""
     global scheduler
     if scheduler is None:
-        scheduler = AsyncIOScheduler(timezone=TZ)
+        scheduler = AsyncIOScheduler(timezone=TZ_UTC)
         scheduler.start()
-        print(f"[CRON] Scheduler iniciado (timezone={_tz_name})")
+        print(f"[CRON] Scheduler iniciado (timezone=UTC)")
     elif not scheduler.running:
         try:
             scheduler.start()
@@ -61,7 +100,7 @@ def normalize_next_interval(interval: MinutesInterval) -> str:
     Exemplo: se agora são 14:23 e interval=15, retorna "2024-01-01 14:30 Local"
     """
     
-    now = datetime.now(TZ)  # Usar horário local do sistema
+    now = datetime.now(TZ_UTC)  # Usar UTC do servidor
     
     if interval == 60:
         # Próxima hora cheia
@@ -547,8 +586,9 @@ async def consultar_shipments_async(db=None):
 
 
 def _get_monitor_hours(job_db):
-    """Retorna tuple (start_hour, end_hour) como inteiros de horas (0-24).
-    Lê strings 'HH:MM' do DB/.env e converte para horas inteiras com fallback 06-18.
+    """Retorna tuple (start_hour, end_hour) como inteiros de horas (0-24) EM UTC.
+    
+    Lê strings 'HH:MM' do DB (que estão em UTC) e converte para horas inteiras.
     """
     try:
         if job_db is None:
@@ -557,26 +597,32 @@ def _get_monitor_hours(job_db):
         end_key = b"config:monitor_end_hour"
         start = job_db.get(start_key)
         end = job_db.get(end_key)
+        
+        # Valores padrão em UTC (06:00 BRT = 09:00 UTC, 18:00 BRT = 21:00 UTC)
         if start:
-            start_hour = start.decode('utf-8')
+            start_hour_str = start.decode('utf-8')
         else:
-            start_hour = os.getenv('MONITOR_START_HOUR', '06:00')
+            # Converter padrão de Brasília para UTC
+            start_hour_str = _convert_brasilia_to_utc_hour(os.getenv('MONITOR_START_HOUR', '06:00'))
+        
         if end:
-            end_hour = end.decode('utf-8')
+            end_hour_str = end.decode('utf-8')
         else:
-            end_hour = os.getenv('MONITOR_END_HOUR', '18:00')
-        # sanitize e converter para inteiro (hora)
-        start_hour = _sanitize_time_format(start_hour)
-        end_hour = _sanitize_time_format(end_hour)
+            # Converter padrão de Brasília para UTC
+            end_hour_str = _convert_brasilia_to_utc_hour(os.getenv('MONITOR_END_HOUR', '18:00'))
+        
+        # Sanitize e converter para inteiro (hora)
+        start_hour_str = _sanitize_time_format(start_hour_str)
+        end_hour_str = _sanitize_time_format(end_hour_str)
 
         try:
-            start_h = int(start_hour.split(':')[0])
+            start_h = int(start_hour_str.split(':')[0])
         except Exception:
-            start_h = 6
+            start_h = 9  # 06:00 BRT = 09:00 UTC
         try:
-            end_h = int(end_hour.split(':')[0])
+            end_h = int(end_hour_str.split(':')[0])
         except Exception:
-            end_h = 18
+            end_h = 21  # 18:00 BRT = 21:00 UTC
 
         # bounds
         start_h = max(0, min(23, start_h))
@@ -584,7 +630,7 @@ def _get_monitor_hours(job_db):
         return start_h, end_h
     except Exception as e:
         print(f"[CRON] Erro ao ler horas de monitoramento: {e}")
-        return 6, 18
+        return 9, 21  # Padrão: 06:00-18:00 BRT = 09:00-21:00 UTC
 
 
 def _sanitize_time_format(time_str):
@@ -599,11 +645,12 @@ def _sanitize_time_format(time_str):
 def _calculate_next_valid_execution(interval_minutes: int, db) -> datetime:
     """Calcula a próxima execução válida DENTRO do horário de monitoramento permitido.
     
-    Retorna um datetime no timezone local que respeita:
+    Trabalha em UTC (timezone do servidor).
+    Retorna um datetime UTC que respeita:
     1. O intervalo de minutos configurado
-    2. O horário de monitoramento (start_hour até end_hour)
+    2. O horário de monitoramento (start_hour até end_hour em UTC)
     """
-    now = datetime.now(TZ)
+    now = datetime.now(TZ_UTC)
     start_h, end_h = _get_monitor_hours(db)
     
     # Calcular o próximo horário baseado no intervalo
@@ -679,16 +726,16 @@ def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
         trigger = IntervalTrigger(
             minutes=interval_minutes, 
             start_date=next_valid_time,
-            timezone=TZ
+            timezone=TZ_UTC
         )
         print(f"[CRON] Trigger criado: IntervalTrigger({interval_minutes}min, start={_fmt_local(next_valid_time)})")
     except Exception as e:
         print(f"[CRON] Erro ao criar trigger, usando IntervalTrigger simples: {e}")
-        trigger = IntervalTrigger(minutes=interval_minutes, timezone=TZ)
+        trigger = IntervalTrigger(minutes=interval_minutes, timezone=TZ_UTC)
     
     # Job que executa as consultas (ainda verifica horário como fallback, mas trigger já garante)
     async def _scheduled_job(job_db):
-        now = datetime.now(TZ)
+        now = datetime.now(TZ_UTC)
         hour = now.hour
         start_hour, end_hour = _get_monitor_hours(job_db)
         # Executar apenas entre start_hour (inclusive) e end_hour (exclusive)
