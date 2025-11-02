@@ -394,7 +394,7 @@ async def set_monitor_hours(request: Request, start_hour: str = Form(...), end_h
     return {"message": f"Horas de monitoramento definidas: {start_hour} - {end_hour} (Brasília)", "next_run_time": next_run}
 
 
-@router.get('/config/monitor_hours')@router.get('/config/monitor_hours')
+@router.get('/config/monitor_hours')
 async def get_monitor_hours(request: Request):
     """Retorna as horas de monitoramento configuradas em HORÁRIO DE BRASÍLIA.
     
