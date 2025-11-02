@@ -29,9 +29,9 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Shutdown: parar monitoramento
-    print("[SHUTDOWN] Parando monitoramento de shipments...")
-    webhooks.parar_monitoramento()
+    # Shutdown: encerrar scheduler com segurança
+    print("[SHUTDOWN] Encerrando scheduler de monitoramento...")
+    webhooks.shutdown_scheduler()
 
 
 app = FastAPI(lifespan=lifespan)

@@ -13,16 +13,45 @@ import os
 from app.tracking import rastrear, MelhorRastreioException
 import time
 import random
+from zoneinfo import ZoneInfo
 
 
 load_dotenv()
 
 
-# Tipo correto para Python
-MinutesInterval = Literal[2, 10, 15, 20, 30, 45, 60]
+# Tipo correto para Python - suporta intervalos de 2min até 4h
+MinutesInterval = Literal[2, 10, 15, 20, 30, 45, 60, 120, 180, 240]
 
 # Scheduler global para monitoramento
 scheduler = None
+_tz_name = os.getenv('TZ', 'America/Sao_Paulo')
+TZ = ZoneInfo(_tz_name)
+
+
+def _fmt_local(dt: datetime) -> str:
+    """Formata datetime em horário local com sufixo 'Local'."""
+    try:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=TZ)
+        return dt.astimezone(TZ).strftime('%Y-%m-%d %H:%M Local')
+    except Exception:
+        return dt.strftime('%Y-%m-%d %H:%M') + ' Local'
+
+
+def get_scheduler() -> AsyncIOScheduler:
+    """Obtém (ou cria) um único scheduler global, já iniciado."""
+    global scheduler
+    if scheduler is None:
+        scheduler = AsyncIOScheduler(timezone=TZ)
+        scheduler.start()
+        print(f"[CRON] Scheduler iniciado (timezone={_tz_name})")
+    elif not scheduler.running:
+        try:
+            scheduler.start()
+            print("[CRON] Scheduler (re)iniciado")
+        except Exception as e:
+            print(f"[CRON] Falha ao iniciar scheduler existente: {e}")
+    return scheduler
 
 
 
@@ -32,7 +61,7 @@ def normalize_next_interval(interval: MinutesInterval) -> str:
     Exemplo: se agora são 14:23 e interval=15, retorna "2024-01-01 14:30 Local"
     """
     
-    now = datetime.now()  # Usar horário local do sistema
+    now = datetime.now(TZ)  # Usar horário local do sistema
     
     if interval == 60:
         # Próxima hora cheia
@@ -53,7 +82,7 @@ def normalize_next_interval(interval: MinutesInterval) -> str:
         next_time = (now.replace(second=0, microsecond=0) + 
                     timedelta(minutes=minutes_to_add))
     
-    return next_time.strftime("%Y-%m-%d %H:%M Local")
+    return _fmt_local(next_time)
 
 
 def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=None):
@@ -517,137 +546,216 @@ async def consultar_shipments_async(db=None):
         print(f"[CRON] Erro na consulta de shipments: {e}")
 
 
-def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
-    """Inicia o monitoramento automático de shipments"""
-    global scheduler
-    
-    # Parar scheduler anterior se estiver rodando
-    if scheduler is not None:
-        try:
-            if scheduler.running:
-                scheduler.shutdown(wait=False)
-                print("[CRON] Scheduler anterior parado")
-        except Exception as e:
-            print(f"[CRON] Aviso ao parar scheduler anterior: {e}")
-    
-    scheduler = AsyncIOScheduler()
-    
-    # Usar CronTrigger para alinhar nos minutos da hora (ex.: */30 => :00 e :30)
-    # Fallback para IntervalTrigger se algo der errado
+def _get_monitor_hours(job_db):
+    """Retorna tuple (start_hour, end_hour) como inteiros de horas (0-24).
+    Lê strings 'HH:MM' do DB/.env e converte para horas inteiras com fallback 06-18.
+    """
     try:
-        if interval_minutes == 60:
-            trigger = CronTrigger(minute=0)
+        if job_db is None:
+            job_db = rocksdbpy.open('database.db', rocksdbpy.Option())
+        start_key = b"config:monitor_start_hour"
+        end_key = b"config:monitor_end_hour"
+        start = job_db.get(start_key)
+        end = job_db.get(end_key)
+        if start:
+            start_hour = start.decode('utf-8')
         else:
-            trigger = CronTrigger(minute=f"*/{interval_minutes}")
-    except Exception:
-        trigger = IntervalTrigger(minutes=interval_minutes)
+            start_hour = os.getenv('MONITOR_START_HOUR', '06:00')
+        if end:
+            end_hour = end.decode('utf-8')
+        else:
+            end_hour = os.getenv('MONITOR_END_HOUR', '18:00')
+        # sanitize e converter para inteiro (hora)
+        start_hour = _sanitize_time_format(start_hour)
+        end_hour = _sanitize_time_format(end_hour)
+
+        try:
+            start_h = int(start_hour.split(':')[0])
+        except Exception:
+            start_h = 6
+        try:
+            end_h = int(end_hour.split(':')[0])
+        except Exception:
+            end_h = 18
+
+        # bounds
+        start_h = max(0, min(23, start_h))
+        end_h = max(1, min(24, end_h))
+        return start_h, end_h
+    except Exception as e:
+        print(f"[CRON] Erro ao ler horas de monitoramento: {e}")
+        return 6, 18
+
+
+def _sanitize_time_format(time_str):
+    """Garante que o formato do horário seja HH:MM."""
+    try:
+        datetime.strptime(time_str, '%H:%M')
+        return time_str
+    except ValueError:
+        return '00:00'  # fallback para um valor padrão
+
+
+def _calculate_next_valid_execution(interval_minutes: int, db) -> datetime:
+    """Calcula a próxima execução válida DENTRO do horário de monitoramento permitido.
     
-    def _get_monitor_hours(job_db):
-        """Retorna tuple (start_hour, end_hour) como inteiros de horas (0-24).
-        Lê strings 'HH:MM' do DB/.env e converte para horas inteiras com fallback 06-18.
-        """
-        try:
-            if job_db is None:
-                job_db = rocksdbpy.open('database.db', rocksdbpy.Option())
-            start_key = b"config:monitor_start_hour"
-            end_key = b"config:monitor_end_hour"
-            start = job_db.get(start_key)
-            end = job_db.get(end_key)
-            if start:
-                start_hour = start.decode('utf-8')
-            else:
-                start_hour = os.getenv('MONITOR_START_HOUR', '06:00')
-            if end:
-                end_hour = end.decode('utf-8')
-            else:
-                end_hour = os.getenv('MONITOR_END_HOUR', '18:00')
-            # sanitize e converter para inteiro (hora)
-            start_hour = _sanitize_time_format(start_hour)
-            end_hour = _sanitize_time_format(end_hour)
+    Retorna um datetime no timezone local que respeita:
+    1. O intervalo de minutos configurado
+    2. O horário de monitoramento (start_hour até end_hour)
+    """
+    now = datetime.now(TZ)
+    start_h, end_h = _get_monitor_hours(db)
+    
+    # Calcular o próximo horário baseado no intervalo
+    if interval_minutes == 60:
+        # Próxima hora cheia
+        next_time = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+    elif interval_minutes < 60:
+        # Próximo múltiplo de minutos
+        current_minute = now.minute
+        remainder = current_minute % interval_minutes
+        if remainder == 0 and now.second == 0:
+            minutes_to_add = interval_minutes
+        else:
+            minutes_to_add = interval_minutes - remainder if remainder > 0 else interval_minutes
+        next_time = (now.replace(second=0, microsecond=0) + timedelta(minutes=minutes_to_add))
+    else:
+        # Intervalos >= 120min: próximo múltiplo de horas
+        step_hours = interval_minutes // 60
+        base = now.replace(minute=0, second=0, microsecond=0)
+        if now.minute != 0 or now.second != 0:
+            base = base + timedelta(hours=1)
+        add_hours = (step_hours - (base.hour % step_hours)) % step_hours
+        if add_hours == 0:
+            add_hours = step_hours
+        next_time = base + timedelta(hours=add_hours)
+    
+    # Se o next_time calculado está FORA do horário permitido, ajustar
+    while next_time.hour < start_h or next_time.hour >= end_h:
+        # Se for antes do início, pular para start_h de hoje ou amanhã
+        if next_time.hour < start_h:
+            next_time = next_time.replace(hour=start_h, minute=0, second=0, microsecond=0)
+            # Garantir alinhamento com intervalo
+            if interval_minutes < 60 and interval_minutes != 1:
+                # Ajustar para múltiplo de interval_minutes
+                next_time = next_time.replace(minute=(next_time.minute // interval_minutes) * interval_minutes)
+        else:
+            # Passou do horário de hoje, vai para start_h de amanhã
+            next_time = (next_time + timedelta(days=1)).replace(hour=start_h, minute=0, second=0, microsecond=0)
+        
+        # Se ainda está fora (ex: end_h <= start_h), adicionar intervalo
+        if next_time.hour >= end_h:
+            next_time = (next_time + timedelta(days=1)).replace(hour=start_h, minute=0, second=0, microsecond=0)
+            break
+        
+        # Se está dentro agora, ok
+        if start_h <= next_time.hour < end_h:
+            break
+    
+    return next_time
 
-            try:
-                start_h = int(start_hour.split(':')[0])
-            except Exception:
-                start_h = 6
-            try:
-                end_h = int(end_hour.split(':')[0])
-            except Exception:
-                end_h = 18
 
-            # bounds
-            start_h = max(0, min(23, start_h))
-            end_h = max(1, min(24, end_h))
-            return start_h, end_h
-        except Exception as e:
-            print(f"[CRON] Erro ao ler horas de monitoramento: {e}")
-            return 6, 18
+def iniciar_monitoramento(interval_minutes: MinutesInterval = 10, db=None):
+    """Cria/atualiza o job de monitoramento sem desligar o scheduler global.
 
-    def _sanitize_time_format(time_str):
-        """Garante que o formato do horário seja HH:MM."""
-        try:
-            datetime.strptime(time_str, '%H:%M')
-            return time_str
-        except ValueError:
-            return '00:00'  # fallback para um valor padrão
+    Retorna string com a próxima execução calculada.
+    """
+    sched = get_scheduler()
 
-    # Agendar um job que só executa as consultas dentro do horário permitido (configurável)
+    # Remover job existente (se houver) em vez de desligar o scheduler
+    try:
+        existing = sched.get_job('monitor_shipments')
+        if existing:
+            sched.remove_job('monitor_shipments')
+            print("[CRON] Job anterior removido")
+    except Exception as e:
+        print(f"[CRON] Não foi possível remover job anterior: {e}")
+
+    # Calcular a próxima execução válida que respeita o horário de monitoramento
+    next_valid_time = _calculate_next_valid_execution(interval_minutes, db)
+    
+    # Usar IntervalTrigger com start_date para garantir execução no horário calculado
+    try:
+        trigger = IntervalTrigger(
+            minutes=interval_minutes, 
+            start_date=next_valid_time,
+            timezone=TZ
+        )
+        print(f"[CRON] Trigger criado: IntervalTrigger({interval_minutes}min, start={_fmt_local(next_valid_time)})")
+    except Exception as e:
+        print(f"[CRON] Erro ao criar trigger, usando IntervalTrigger simples: {e}")
+        trigger = IntervalTrigger(minutes=interval_minutes, timezone=TZ)
+    
+    # Job que executa as consultas (ainda verifica horário como fallback, mas trigger já garante)
     async def _scheduled_job(job_db):
-        now = datetime.now()
+        now = datetime.now(TZ)
         hour = now.hour
         start_hour, end_hour = _get_monitor_hours(job_db)
         # Executar apenas entre start_hour (inclusive) e end_hour (exclusive)
         if start_hour <= hour < end_hour:
             try:
+                print(f"[CRON] Executando consulta de shipments em {_fmt_local(now)}")
                 await consultar_shipments_async(job_db)
             except Exception as e:
                 print(f"[CRON] Erro ao executar consultar_shipments_async: {e}")
         else:
-            print(f"[CRON] Pulando execução automática fora do horário permitido ({now.strftime('%Y-%m-%d %H:%M')}) - permitido {start_hour}:00-{end_hour}:00")
+            print(f"[CRON] Pulando execução fora do horário ({_fmt_local(now)}) - permitido {start_hour:02d}:00-{end_hour:02d}:00")
 
     try:
-        scheduler.add_job(
+        sched.add_job(
             _scheduled_job,
             trigger=trigger,
             args=[db],
             id='monitor_shipments',
             replace_existing=True,
-            max_instances=1
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60,
         )
-        
-        scheduler.start()
         print(f"[CRON] Monitoramento iniciado com intervalo de {interval_minutes} minutos")
-        # Exibir a próxima execução REAL do APScheduler
+        # Exibir e retornar a próxima execução REAL do APScheduler
         try:
-            job = scheduler.get_job('monitor_shipments')
+            job = sched.get_job('monitor_shipments')
             if job and job.next_run_time:
-                next_run = job.next_run_time
-                # Converter para horário local, se for timezone-aware
-                try:
-                    next_run_str = next_run.astimezone().strftime('%Y-%m-%d %H:%M Local')
-                except Exception:
-                    next_run_str = next_run.strftime('%Y-%m-%d %H:%M') + ' Local'
+                next_run_str = _fmt_local(job.next_run_time)
                 print(f"[CRON] Próxima execução (real): {next_run_str}")
+                return next_run_str
         except Exception as e:
             print(f"[CRON] Não foi possível obter próxima execução: {e}")
-            
+        return normalize_next_interval(interval_minutes)
     except Exception as e:
         print(f"Erro ao iniciar monitoramento: {e}")
+        return normalize_next_interval(interval_minutes)
 
 
 def parar_monitoramento():
-    """Para o monitoramento automático"""
+    """Remove o job de monitoramento (mantém o scheduler vivo)."""
+    try:
+        sched = get_scheduler()
+        if sched.get_job('monitor_shipments'):
+            sched.remove_job('monitor_shipments')
+            print("[CRON] Monitoramento parado (job removido)")
+        else:
+            print("[CRON] Nenhum job de monitoramento para remover")
+    except Exception as e:
+        print(f"[CRON] Erro ao parar monitoramento: {e}")
+
+
+def shutdown_scheduler():
+    """Encerra o scheduler global com segurança (usar apenas no shutdown da app)."""
     global scheduler
-    if scheduler is not None:
-        try:
-            if scheduler.running:
-                scheduler.shutdown(wait=True)
-                print("[CRON] Monitoramento parado")
-            else:
-                print("[CRON] Scheduler já estava parado")
-        except Exception as e:
-            print(f"[CRON] Erro ao parar monitoramento: {e}")
-    else:
-        print("[CRON] Scheduler não inicializado")
+    if scheduler is None:
+        return
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+            print("[CRON] Scheduler encerrado")
+    except Exception as e:
+        # Silenciar erro comum quando já não está rodando
+        if 'Scheduler is not running' in str(e):
+            print("[CRON] Scheduler já não estava rodando ao encerrar")
+        else:
+            print(f"[CRON] Erro ao encerrar scheduler: {e}")
 
 
 def get_shipments_for_api(db):

@@ -109,8 +109,8 @@ async def iniciar_monitoramento_endpoint(request: Request, interval_minutes: int
     """
     from app import webhooks
     try:
-        webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=request.app.state.db)
-        return {"message": f"Monitoramento iniciado com intervalo de {interval_minutes} minutos"}
+        next_run = webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=request.app.state.db)
+        return {"message": f"Monitoramento iniciado com intervalo de {interval_minutes} minutos", "next_run_time": next_run}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao iniciar monitoramento: {str(e)}")
 
@@ -136,8 +136,21 @@ async def status_monitoramento():
     from app import webhooks
     try:
         running = webhooks.scheduler is not None and webhooks.scheduler.running
+        next_run_time = None
+        try:
+            if running and webhooks.scheduler:
+                job = webhooks.scheduler.get_job('monitor_shipments')
+                if job and job.next_run_time:
+                    next_run_time = job.next_run_time
+                    try:
+                        next_run_time = webhooks._fmt_local(next_run_time)
+                    except Exception:
+                        next_run_time = str(next_run_time)
+        except Exception:
+            next_run_time = None
         return {
             "running": running,
+            "next_run_time": next_run_time,
             "message": "Monitoramento ativo" if running else "Monitoramento inativo"
         }
     except Exception as e:
@@ -262,24 +275,27 @@ async def get_shipments_ativos(request: Request):
 async def set_interval_minutes(request: Request, interval_minutes: int = Form(...)):
     """
     Define o intervalo de minutos para o monitoramento automático
+    Aceita: 2, 10, 15, 20, 30, 45, 60, 120 (2h), 180 (3h), 240 (4h) minutos
     """
-    if interval_minutes < 2 or interval_minutes > 60:
-        raise HTTPException(status_code=400, detail="Intervalo deve ser entre 2 e 60 minutos")
+    valid_intervals = [2, 10, 15, 20, 30, 45, 60, 120, 180, 240]
+    if interval_minutes not in valid_intervals:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Intervalo deve ser um dos seguintes: {', '.join(map(str, valid_intervals))} minutos"
+        )
 
     db = request.app.state.db
     key = b"config:interval_minutes"
     db.set(key, str(interval_minutes).encode('utf-8'))
 
-    # Reiniciar o monitoramento com o novo intervalo
+    # Atualizar o job de monitoramento com o novo intervalo (sem desligar scheduler)
     try:
         from app import webhooks
-        webhooks.parar_monitoramento()
-        webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=db)
-        print(f"[CONFIG] Intervalo de monitoramento alterado para {interval_minutes} minutos")
+        next_run = webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=db)
+        print(f"[CONFIG] Intervalo de monitoramento alterado para {interval_minutes} minutos | Próxima: {next_run}")
     except Exception as e:
         print(f"[CONFIG] Erro ao reiniciar monitoramento: {e}")
-
-    return {"message": f"Intervalo definido para {interval_minutes} minutos"}
+    return {"message": f"Intervalo definido para {interval_minutes} minutos", "next_run_time": next_run}
 
 
 @router.get("/config/interval_minutes")
@@ -319,15 +335,16 @@ async def set_monitor_hours(request: Request, start_hour: str = Form(...), end_h
     db.set(b"config:monitor_start_hour", start_hour.encode('utf-8'))
     db.set(b"config:monitor_end_hour", end_hour.encode('utf-8'))
 
-    # Reiniciar o monitoramento para aplicar imediatamente (se ativo)
+    # Reagendar o job para aplicar imediatamente (se ativo)
     try:
         from app import webhooks
-        webhooks.parar_monitoramento()
-        webhooks.iniciar_monitoramento(interval_minutes=int(db.get(b"config:interval_minutes") or b"30"), db=db)
+        raw = db.get(b"config:interval_minutes")
+        current_interval = int(raw.decode('utf-8')) if raw else 30
+        next_run = webhooks.iniciar_monitoramento(interval_minutes=current_interval, db=db)
+        print(f"[CONFIG] Horas alteradas para {start_hour}-{end_hour} | Próxima: {next_run}")
     except Exception as e:
         print(f"[CONFIG] Erro ao reiniciar monitoramento após alterar horas: {e}")
-
-    return {"message": f"Horas de monitoramento definidas: {start_hour} - {end_hour}"}
+    return {"message": f"Horas de monitoramento definidas: {start_hour} - {end_hour}", "next_run_time": next_run}
 
 
 @router.get('/config/monitor_hours')
