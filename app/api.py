@@ -277,8 +277,12 @@ async def set_interval_minutes(request: Request, interval_minutes: int = Form(..
     Define o intervalo de minutos para o monitoramento automático
     Aceita: 2, 10, 15, 20, 30, 45, 60, 120 (2h), 180 (3h), 240 (4h) minutos
     """
+    print(f"[API] ========== MUDANÇA DE INTERVALO ==========")
+    print(f"[API] Novo intervalo solicitado: {interval_minutes} minutos")
+    
     valid_intervals = [2, 10, 15, 20, 30, 45, 60, 120, 180, 240]
     if interval_minutes not in valid_intervals:
+        print(f"[API] ERRO: Intervalo {interval_minutes} inválido!")
         raise HTTPException(
             status_code=400, 
             detail=f"Intervalo deve ser um dos seguintes: {', '.join(map(str, valid_intervals))} minutos"
@@ -286,15 +290,29 @@ async def set_interval_minutes(request: Request, interval_minutes: int = Form(..
 
     db = request.app.state.db
     key = b"config:interval_minutes"
+    
+    # Ler valor anterior
+    old_config = db.get(key)
+    old_interval = int(old_config.decode('utf-8')) if old_config else None
+    print(f"[API] Intervalo anterior: {old_interval} minutos")
+    
+    # Salvar novo valor
     db.set(key, str(interval_minutes).encode('utf-8'))
+    print(f"[API] Novo intervalo salvo no banco: {interval_minutes} minutos")
 
-    # Atualizar o job de monitoramento com o novo intervalo (sem desligar scheduler)
+    # SEMPRE atualizar o job de monitoramento
+    next_run = None
     try:
         from app import webhooks
+        print(f"[API] Reagendando monitoramento com intervalo de {interval_minutes} minutos...")
         next_run = webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=db)
-        print(f"[CONFIG] Intervalo de monitoramento alterado para {interval_minutes} minutos | Próxima: {next_run}")
+        print(f"[CONFIG] ✅ Intervalo alterado de {old_interval} para {interval_minutes} minutos | Próxima execução: {next_run}")
     except Exception as e:
-        print(f"[CONFIG] Erro ao reiniciar monitoramento: {e}")
+        print(f"[CONFIG] ❌ ERRO ao reagendar monitoramento: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print(f"[API] ========== FIM MUDANÇA DE INTERVALO ==========")
     return {"message": f"Intervalo definido para {interval_minutes} minutos", "next_run_time": next_run}
 
 
@@ -326,11 +344,15 @@ async def set_monitor_hours(request: Request, start_hour: str = Form(...), end_h
     
     Converte Brasília -> UTC antes de salvar no banco.
     """
+    print(f"[API] ========== MUDANÇA DE HORÁRIO DE MONITORAMENTO ==========")
+    print(f"[API] Novo horário solicitado: {start_hour} - {end_hour} (Brasília)")
+    
     try:
         # Validar formato
         datetime.strptime(start_hour, '%H:%M')
         datetime.strptime(end_hour, '%H:%M')
     except ValueError:
+        print(f"[API] ERRO: Formato de hora inválido!")
         raise HTTPException(status_code=400, detail="Horas devem estar no formato HH:MM")
 
     # Converter Brasília -> UTC antes de salvar
@@ -338,23 +360,41 @@ async def set_monitor_hours(request: Request, start_hour: str = Form(...), end_h
     start_hour_utc = webhooks._convert_brasilia_to_utc_hour(start_hour)
     end_hour_utc = webhooks._convert_brasilia_to_utc_hour(end_hour)
     
+    print(f"[API] Conversão Brasília->UTC: {start_hour} BRT -> {start_hour_utc} UTC")
+    print(f"[API] Conversão Brasília->UTC: {end_hour} BRT -> {end_hour_utc} UTC")
+    
     db = request.app.state.db
+    
+    # Ler valores anteriores
+    old_start = db.get(b"config:monitor_start_hour")
+    old_end = db.get(b"config:monitor_end_hour")
+    old_start_str = old_start.decode('utf-8') if old_start else 'não definido'
+    old_end_str = old_end.decode('utf-8') if old_end else 'não definido'
+    print(f"[API] Horário anterior (UTC): {old_start_str} - {old_end_str}")
+    
+    # Salvar novos valores
     db.set(b"config:monitor_start_hour", start_hour_utc.encode('utf-8'))
     db.set(b"config:monitor_end_hour", end_hour_utc.encode('utf-8'))
+    print(f"[API] Novo horário salvo no banco (UTC): {start_hour_utc} - {end_hour_utc}")
 
-    # Reagendar o job para aplicar imediatamente (se ativo)
+    # SEMPRE reagendar o job para aplicar imediatamente
+    next_run = None
     try:
         raw = db.get(b"config:interval_minutes")
         current_interval = int(raw.decode('utf-8')) if raw else 30
+        print(f"[API] Reagendando monitoramento (intervalo atual: {current_interval} minutos)...")
         next_run = webhooks.iniciar_monitoramento(interval_minutes=current_interval, db=db)
-        print(f"[CONFIG] Horas alteradas para {start_hour} BRT ({start_hour_utc} UTC) - {end_hour} BRT ({end_hour_utc} UTC) | Próxima: {next_run}")
+        print(f"[CONFIG] ✅ Horários alterados: {start_hour}-{end_hour} BRT ({start_hour_utc}-{end_hour_utc} UTC) | Próxima execução: {next_run}")
     except Exception as e:
-        print(f"[CONFIG] Erro ao reiniciar monitoramento após alterar horas: {e}")
-        next_run = None
+        print(f"[CONFIG] ❌ ERRO ao reagendar monitoramento após alterar horas: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print(f"[API] ========== FIM MUDANÇA DE HORÁRIO ==========")
     return {"message": f"Horas de monitoramento definidas: {start_hour} - {end_hour} (Brasília)", "next_run_time": next_run}
 
 
-@router.get('/config/monitor_hours')
+@router.get('/config/monitor_hours')@router.get('/config/monitor_hours')
 async def get_monitor_hours(request: Request):
     """Retorna as horas de monitoramento configuradas em HORÁRIO DE BRASÍLIA.
     
