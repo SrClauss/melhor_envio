@@ -645,59 +645,92 @@ def _sanitize_time_format(time_str):
 def _calculate_next_valid_execution(interval_minutes: int, db) -> datetime:
     """Calcula a próxima execução válida DENTRO do horário de monitoramento permitido.
     
-    Trabalha em UTC (timezone do servidor).
+    IMPORTANTE: Horários de monitoramento são em BRASÍLIA, mas o cálculo retorna UTC.
+    - Usuário configura: 06:00-23:00 BRT
+    - Banco armazena: 09:00-02:00 UTC (convertido)
+    - Esta função: calcula baseado em horário ATUAL de Brasília para verificar se está dentro do range
+    
     Retorna um datetime UTC que respeita:
     1. O intervalo de minutos configurado
-    2. O horário de monitoramento (start_hour até end_hour em UTC)
+    2. O horário de monitoramento (verificado em horário de Brasília)
     """
-    now = datetime.now(TZ_UTC)
-    start_h, end_h = _get_monitor_hours(db)
+    # Pegar horário atual em Brasília E em UTC
+    now_brasilia = datetime.now(TZ_DISPLAY)
+    now_utc = datetime.now(TZ_UTC)
     
-    # Calcular o próximo horário baseado no intervalo
+    # Ler horários do banco (estão em UTC) e converter para Brasília
+    start_h_utc, end_h_utc = _get_monitor_hours(db)
+    
+    # CONVERTER os horários UTC para Brasília para comparação
+    # Criar datetime UTC de hoje e converter para Brasília
+    today_utc = now_utc.date()
+    start_dt_utc = datetime(today_utc.year, today_utc.month, today_utc.day, start_h_utc, 0, tzinfo=TZ_UTC)
+    end_dt_utc = datetime(today_utc.year, today_utc.month, today_utc.day, end_h_utc, 0, tzinfo=TZ_UTC)
+    
+    start_dt_brasilia = start_dt_utc.astimezone(TZ_DISPLAY)
+    end_dt_brasilia = end_dt_utc.astimezone(TZ_DISPLAY)
+    
+    start_h_brt = start_dt_brasilia.hour
+    end_h_brt = end_dt_brasilia.hour
+    
+    print(f"[DEBUG] Horário atual Brasília: {now_brasilia.strftime('%H:%M')}")
+    print(f"[DEBUG] Range permitido Brasília: {start_h_brt:02d}:00 - {end_h_brt:02d}:00")
+    
+    # Calcular o próximo horário baseado no intervalo (em Brasília)
     if interval_minutes == 60:
         # Próxima hora cheia
-        next_time = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+        next_time = (now_brasilia.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
     elif interval_minutes < 60:
         # Próximo múltiplo de minutos
-        current_minute = now.minute
+        current_minute = now_brasilia.minute
         remainder = current_minute % interval_minutes
-        if remainder == 0 and now.second == 0:
+        if remainder == 0 and now_brasilia.second == 0:
             minutes_to_add = interval_minutes
         else:
             minutes_to_add = interval_minutes - remainder if remainder > 0 else interval_minutes
-        next_time = (now.replace(second=0, microsecond=0) + timedelta(minutes=minutes_to_add))
+        next_time = (now_brasilia.replace(second=0, microsecond=0) + timedelta(minutes=minutes_to_add))
     else:
         # Intervalos >= 120min: próximo múltiplo de horas
         step_hours = interval_minutes // 60
-        base = now.replace(minute=0, second=0, microsecond=0)
-        if now.minute != 0 or now.second != 0:
+        base = now_brasilia.replace(minute=0, second=0, microsecond=0)
+        if now_brasilia.minute != 0 or now_brasilia.second != 0:
             base = base + timedelta(hours=1)
         add_hours = (step_hours - (base.hour % step_hours)) % step_hours
         if add_hours == 0:
             add_hours = step_hours
         next_time = base + timedelta(hours=add_hours)
     
-    # Se o next_time calculado está FORA do horário permitido, ajustar
-    while next_time.hour < start_h or next_time.hour >= end_h:
-        # Se for antes do início, pular para start_h de hoje ou amanhã
-        if next_time.hour < start_h:
-            next_time = next_time.replace(hour=start_h, minute=0, second=0, microsecond=0)
+    print(f"[DEBUG] Próximo horário calculado (Brasília): {next_time.strftime('%Y-%m-%d %H:%M')}")
+    
+    # Ajustar se está fora do horário permitido (comparação em Brasília)
+    max_attempts = 10
+    attempts = 0
+    while attempts < max_attempts:
+        attempts += 1
+        
+        # Verificar se está dentro do range em horário de Brasília
+        if start_h_brt <= next_time.hour < end_h_brt:
+            print(f"[DEBUG] ✅ Horário {next_time.strftime('%H:%M')} está dentro do range permitido")
+            break
+        
+        # Se for antes do início, pular para start_h
+        if next_time.hour < start_h_brt:
+            print(f"[DEBUG] Hora {next_time.hour} < start {start_h_brt}, ajustando para início do período")
+            next_time = next_time.replace(hour=start_h_brt, minute=0, second=0, microsecond=0)
             # Garantir alinhamento com intervalo
             if interval_minutes < 60 and interval_minutes != 1:
-                # Ajustar para múltiplo de interval_minutes
                 next_time = next_time.replace(minute=(next_time.minute // interval_minutes) * interval_minutes)
         else:
             # Passou do horário de hoje, vai para start_h de amanhã
-            next_time = (next_time + timedelta(days=1)).replace(hour=start_h, minute=0, second=0, microsecond=0)
-        
-        # Se ainda está fora (ex: end_h <= start_h), adicionar intervalo
-        if next_time.hour >= end_h:
-            next_time = (next_time + timedelta(days=1)).replace(hour=start_h, minute=0, second=0, microsecond=0)
-            break
-        
-        # Se está dentro agora, ok
-        if start_h <= next_time.hour < end_h:
-            break
+            print(f"[DEBUG] Hora {next_time.hour} >= end {end_h_brt}, indo para amanhã")
+            next_time = (next_time + timedelta(days=1)).replace(hour=start_h_brt, minute=0, second=0, microsecond=0)
+    
+    # Converter de volta para UTC para o scheduler
+    next_time_utc = next_time.astimezone(TZ_UTC)
+    print(f"[DEBUG] Próximo horário final (UTC): {next_time_utc.strftime('%Y-%m-%d %H:%M')}")
+    print(f"[DEBUG] Próximo horário final (Brasília): {next_time.strftime('%Y-%m-%d %H:%M')}")
+    
+    return next_time_utc
     
     return next_time
 
