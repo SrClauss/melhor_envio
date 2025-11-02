@@ -329,8 +329,8 @@ def enviar_para_whatsapp(mensagem, telefone):
     to_phone = f"+{digits}"
 
     payload = {
-        "toPhone": to_phone,
-        #"toPhone": "+5527998870163",
+        #"toPhone": to_phone,
+        "toPhone": "+5527998870163",
         "fromPhone": from_phone,
         "organizationId": organization_id,
         "message": mensagem,
