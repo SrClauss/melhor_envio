@@ -15,6 +15,63 @@ import time
 import random
 from zoneinfo import ZoneInfo
 
+# Cache simples para template de WhatsApp (evita ler o DB a cada chamada)
+_WHATSAPP_TEMPLATE_CACHE = {
+    "value": None,  # tipo: Optional[str]
+    "ts": 0        # epoch seconds
+}
+
+# Template padrão de WhatsApp (inclui bloco do vídeo). Usado quando não há template salvo no DB.
+DEFAULT_WHATSAPP_TEMPLATE = (
+    "[cliente],\n\n"
+    "Tô passando pra avisar que sua encomenda movimentou! 📦\n\n"
+    "[rastreio]\n\n"
+    "Você também pode acompanhar o pedido sempre que quiser pelo link: 👇\n"
+    "[link_rastreio]\n\n"
+    "🚨ATENÇÃO! ASSISTA O VIDEO ABAIXO, POIS TEMOS UMA IMPORTANTE INFORMAÇÃO PARA TE PASSAR🚨\n"
+    "👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇\n"
+    "https://youtube.com/shorts/CcgV7C8m6Ls?si=o-TqLzsBCBli6gdN\n\n"
+    "Mas pode deixar que assim que tiver alguma novidade, corro aqui pra te avisar! 🏃‍♀️\n\n"
+    "⚠️ Ah, e atenção: nunca solicitamos pagamentos adicionais, dados ou senhas para finalizar a entrega.\n\n"
+    "Se tiver dúvidas, entre em contato conosco.\n\n"
+    "Até mais! 💙"
+)
+
+def _get_whatsapp_template_from_db(db=None, ttl_seconds: int = 60):
+    """Obtém o template customizado do WhatsApp do RocksDB com cache simples.
+    Se não existir, retorna o DEFAULT_WHATSAPP_TEMPLATE. Se houver erro ao ler, ignora silenciosamente.
+    """
+    try:
+        now = time.time()
+        if _WHATSAPP_TEMPLATE_CACHE["value"] is not None and (now - _WHATSAPP_TEMPLATE_CACHE["ts"]) < ttl_seconds:
+            return _WHATSAPP_TEMPLATE_CACHE["value"]
+
+        raw = None
+        if db is not None:
+            try:
+                raw = db.get(b"config:whatsapp_template")
+            except Exception:
+                raw = None
+        else:
+            # Como fallback, tenta abrir rapidamente o DB (mesmo padrão usado em outras partes)
+            try:
+                raw = rocksdbpy.open('database.db', rocksdbpy.Option()).get(b"config:whatsapp_template")
+            except Exception:
+                raw = None
+
+        value = raw.decode('utf-8') if raw else None
+
+        # Se não houver no DB, permitir default via ENV, e por fim cair no DEFAULT_WHATSAPP_TEMPLATE
+        if not value:
+            env_default = os.getenv('WHATSAPP_TEMPLATE_DEFAULT', '').strip()
+            value = env_default or DEFAULT_WHATSAPP_TEMPLATE
+
+        _WHATSAPP_TEMPLATE_CACHE["value"] = value
+        _WHATSAPP_TEMPLATE_CACHE["ts"] = now
+        return value
+    except Exception:
+        return None
+
 
 load_dotenv()
 
@@ -190,7 +247,7 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
         destino = evento.get('destino') or ''
         rota = evento.get('rota') or ''
 
-        # Construir mensagem estilo Magalu
+        # Construir mensagem estilo Magalu (ou aplicar template customizado)
         linhas = []
         
         # Saudação personalizada
@@ -251,17 +308,55 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
             linhas.append("Você também pode acompanhar o pedido sempre que quiser pelo link: 👇")
             linhas.append(f"https://melhorrastreio.com.br/{codigo_rastreio}")
             linhas.append("")
+
+        # Se existir template customizado no DB, aplicar substituições
+        template_custom = _get_whatsapp_template_from_db()
+        if template_custom:
+            # Montar blocos para placeholders
+            status_line = f"{emoji_status} {titulo}" if titulo else ""
+            rota_partes = []
+            if origem:
+                rota_partes.append(origem)
+            if destino:
+                rota_partes.append(destino)
+            rota_texto = " → ".join([p for p in rota_partes if p]) if rota_partes else (rota or "")
+            link_rastreio = f"https://melhorrastreio.com.br/{codigo_rastreio}" if codigo_rastreio else ""
+            # placeholder [rota] inclui label e emoji, se houver valor
+            rota_texto_label = f"🚛 Rota: {rota_texto}" if rota_texto else ""
+
+            info_blocos = []
+            if status_line:
+                info_blocos.append(status_line)
+            if localizacao:
+                info_blocos.append(f"📍 Localização: {localizacao}")
+            if rota_texto:
+                info_blocos.append(f"🚛 Rota: {rota_texto}")
+            if data_formatada:
+                info_blocos.append(f"🕒 Última atualização: {data_formatada}")
+            info_texto = "\n".join(info_blocos)
+
+            final_msg = template_custom
+            # Placeholders suportados
+            replacements = {
+                "[cliente]": (nome_cliente or "Olá"),
+                "[info]": info_texto,
+                "[rastreio]": info_texto,
+                "[link_rastreio]": link_rastreio,
+                "[codigo]": (codigo_rastreio or ""),
+                "[status]": status_line,
+                "[rota]": rota_texto_label,
+                "[localizacao]": (localizacao or ""),
+                "[data]": (data_formatada or ""),
+            }
+            try:
+                for k, v in replacements.items():
+                    final_msg = final_msg.replace(k, v)
+                return final_msg
+            except Exception:
+                # Se der erro, cai para o fluxo padrão
+                pass
         
-        # Bloco opcional: aviso para assistir ao vídeo (configurável por env)
-        try:
-            video_url = os.getenv('VIDEO_AVISO_URL', '').strip()
-        except Exception:
-            video_url = ''
-        if video_url:
-            linhas.append("🚨 ATENÇÃO! ASSISTA O VÍDEO ABAIXO, TEM UMA INFORMAÇÃO IMPORTANTE PRA VOCÊ 🚨")
-            linhas.append("👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇")
-            linhas.append(video_url)
-            linhas.append("")
+        # Caso não use template custom, não injeta vídeo automaticamente; admin pode incluir no template salvo
         
         linhas.append("Mas pode deixar que assim que tiver alguma novidade, corro aqui pra te avisar! 🏃‍♀️")
         linhas.append("")
