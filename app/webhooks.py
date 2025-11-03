@@ -546,6 +546,10 @@ def consultar_shipments(db=None):
                 try:
                     key_str = key.decode('utf-8')
                     if key_str.startswith('etiqueta:'):
+                        # Ignorar chaves auxiliares como :last_error
+                        if ':last_error' in key_str:
+                            continue
+                        
                         shipment_id_in_db = key_str.replace('etiqueta:', '')
                         if shipment_id_in_db not in current_shipment_ids:
                             keys_to_remove.append(key)
@@ -556,10 +560,20 @@ def consultar_shipments(db=None):
             # Remover as chaves fora do iterator
             for key in keys_to_remove:
                 try:
-                    db.delete(key)
-                    removed_count += 1
                     key_str = key.decode('utf-8')
                     shipment_id_in_db = key_str.replace('etiqueta:', '')
+                    
+                    # Remover chave principal
+                    db.delete(key)
+                    removed_count += 1
+                    
+                    # Remover chave :last_error associada, se existir
+                    last_error_key = f"etiqueta:{shipment_id_in_db}:last_error".encode('utf-8')
+                    try:
+                        db.delete(last_error_key)
+                    except:
+                        pass  # Chave não existe, ignorar
+                    
                     print(f"[REMOVIDO] Shipment {shipment_id_in_db} não encontrado na API, removido do banco")
                 except Exception as e:
                     print(f"Erro ao remover chave {key}: {e}")
