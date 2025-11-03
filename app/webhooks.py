@@ -461,7 +461,7 @@ def consultar_shipments(db=None):
 
             # Determinar se rastreio atual é erro
             try:
-                is_error_rastreio = isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado
+                is_error_rastreio = not isinstance(rastreio_detalhado, dict) or (isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado)
             except Exception:
                 is_error_rastreio = True
 
