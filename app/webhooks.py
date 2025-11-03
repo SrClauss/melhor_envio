@@ -527,7 +527,7 @@ def consultar_shipments(db=None):
                 try:
                     mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
                     #enviar_para_whatsapp(mensagem, telefone)
-                    enviar_para_whatsapp_(mensagem, telefone)
+                    enviar_para_whatsapp(mensagem, telefone)
                     notifications_sent += 1
                     print(f"[WHATSAPP] Notificação enviada para {telefone}")
                 except Exception as e:
@@ -1140,15 +1140,6 @@ def forcar_extracao_rastreio(db=None):
         
     else:
         raise HTTPException(status_code=response.status_code, detail=response.text)
-async def forcar_extracao_rastreio_async(db=None):
-    """Wrapper async para forcar_extracao_rastreio que executa a função síncrona em um executor."""
-    try:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, forcar_extracao_rastreio, db)
-        print(f"[EXTRAÇÃO] Extração forçada executada em {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    except Exception as e:
-        print(f"[EXTRAÇÃO] ❌ Erro ao executar forcar_extracao_rastreio_async: {e}")
-        raise
 
 
 
