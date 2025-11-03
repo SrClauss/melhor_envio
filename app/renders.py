@@ -118,5 +118,59 @@ async def render_envios_template(request: Request, current_user: str = Depends(g
     """
     return templates.TemplateResponse("envios.html", {"request": request, "username": current_user})
 
+@router.get("/mensagem", response_class=HTMLResponse)
+async def render_mensagem_template(request: Request, current_user: str = Depends(get_current_user)):
+    """Tela para editar o modelo de mensagem do WhatsApp com placeholders."""
+    db = request.app.state.db
+    raw = None
+    try:
+        raw = db.get(b"config:whatsapp_template")
+    except Exception:
+        raw = None
+    if raw:
+        template_text = raw.decode('utf-8')
+    else:
+        # Template padrão igual ao desejado, usando placeholders dinâmicos
+        template_text = (
+            "[cliente],\n\n"
+            "Tô passando pra avisar que sua encomenda movimentou! 📦\n\n"
+            "[info]\n\n"
+            "🕒 Última atualização: [data]\n\n"
+            "Você também pode acompanhar o pedido sempre que quiser pelo link: 👇\n"
+            "[link_rastreio]\n\n"
+            "🚨ATENÇÃO! ASSISTA O VIDEO ABAIXO, POIS TEMOS UMA IMPORTANTE INFORMAÇÃO PARA TE PASSAR🚨\n"
+            "👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇\n"
+            "https://youtube.com/shorts/CcgV7C8m6Ls?si=o-TqLzsBCBli6gdN\n\n"
+            "Mas pode deixar que assim que tiver alguma novidade, corro aqui pra te avisar! 🏃‍♀️\n\n"
+            "⚠️ Ah, e atenção: nunca solicitamos pagamentos adicionais, dados ou senhas para finalizar a entrega.\n\n"
+            "Se tiver dúvidas, entre em contato conosco.\n\n"
+            "Até mais! 💙\n"
+        )
+        # Opcional: já persistir como padrão para ser usado imediatamente
+        try:
+            db.set(b"config:whatsapp_template", template_text.encode('utf-8'))
+        except Exception:
+            pass
+    return templates.TemplateResponse("mensagem.html", {"request": request, "template_text": template_text})
+
+
+@router.post("/mensagem")
+async def salvar_mensagem_template(request: Request, template: str = Form(...), current_user: str = Depends(get_current_user)):
+    """Salva o modelo de mensagem no RocksDB."""
+    db = request.app.state.db
+    try:
+        db.set(b"config:whatsapp_template", template.encode('utf-8'))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Falha ao salvar template: {e}")
+    # Invalida cache no módulo webhooks (se estiver carregado)
+    try:
+        from app import webhooks
+        if hasattr(webhooks, '_WHATSAPP_TEMPLATE_CACHE'):
+            webhooks._WHATSAPP_TEMPLATE_CACHE["value"] = None
+            webhooks._WHATSAPP_TEMPLATE_CACHE["ts"] = 0
+    except Exception:
+        pass
+    return RedirectResponse(url="/mensagem", status_code=303)
+
 
 
