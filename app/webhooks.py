@@ -303,7 +303,8 @@ def extrair_rastreio_api(codigo_rastreio):
     except Exception as e:
         return {"erro": f"Erro ao consultar rastreio: {str(e)}", "codigo": codigo_rastreio}
 
-
+def enviar_para_whatsapp_(mensagem, telefone):
+    print(f"[DEBUG] Enviando mensagem via Umbler para {telefone}")
 def enviar_para_whatsapp(mensagem, telefone):
     """
     Envia a mensagem para o número de telefone via WhatsApp Web.
@@ -525,7 +526,8 @@ def consultar_shipments(db=None):
             if should_notify:
                 try:
                     mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
-                    enviar_para_whatsapp(mensagem, telefone)
+                    #enviar_para_whatsapp(mensagem, telefone)
+                    enviar_para_whatsapp_(mensagem, telefone)
                     notifications_sent += 1
                     print(f"[WHATSAPP] Notificação enviada para {telefone}")
                 except Exception as e:
