@@ -1142,4 +1142,13 @@ def forcar_extracao_rastreio(db=None):
         raise HTTPException(status_code=response.status_code, detail=response.text)
 
 
+async def forcar_extracao_rastreio_async(db):
+    """
+    Versão assíncrona da forcar_extracao_rastreio.
+    Executa a extração em um executor para não bloquear o event loop.
+    """
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, forcar_extracao_rastreio, db)
+
+
 
