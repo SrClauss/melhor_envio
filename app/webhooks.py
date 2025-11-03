@@ -291,8 +291,8 @@ def extrair_rastreio_api(codigo_rastreio):
         resultado = rastrear(codigo_rastreio)
         
         # Throttle simples: aguardar um pequeno intervalo antes da próxima requisição
-        # Configurável via env WEBHOOKS_THROTTLE (padrão: 0.3 segundos)
-        throttle_time = float(os.getenv('WEBHOOKS_THROTTLE', 0.3))
+        # Configurável via env WEBHOOKS_THROTTLE (padrão: 0.5 segundos)
+        throttle_time = float(os.getenv('WEBHOOKS_THROTTLE', 0.5))
         time.sleep(throttle_time)
         
         # Retornar dados completos da API em formato JSON
