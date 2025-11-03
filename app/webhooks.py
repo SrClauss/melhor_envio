@@ -252,6 +252,17 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
             linhas.append(f"https://melhorrastreio.com.br/{codigo_rastreio}")
             linhas.append("")
         
+        # Bloco opcional: aviso para assistir ao vídeo (configurável por env)
+        try:
+            video_url = os.getenv('VIDEO_AVISO_URL', '').strip()
+        except Exception:
+            video_url = ''
+        if video_url:
+            linhas.append("🚨 ATENÇÃO! ASSISTA O VÍDEO ABAIXO, TEM UMA INFORMAÇÃO IMPORTANTE PRA VOCÊ 🚨")
+            linhas.append("👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇👇")
+            linhas.append(video_url)
+            linhas.append("")
+        
         linhas.append("Mas pode deixar que assim que tiver alguma novidade, corro aqui pra te avisar! 🏃‍♀️")
         linhas.append("")
         linhas.append("⚠️ Ah, e atenção: nunca solicitamos pagamentos adicionais, dados ou senhas para finalizar a entrega.")
