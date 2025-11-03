@@ -177,9 +177,48 @@ function copyTrackingById(envioId) {
     if (!envio) return;
     const tracking = envio.tracking || envio.rastreio_completo || '';
     if (!tracking) return;
-    navigator.clipboard.writeText(tracking).then(() => {
-        alert('Código de rastreio copiado: ' + tracking);
-    });
+    
+    // Tentar usar a Clipboard API moderna (HTTPS obrigatório)
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(tracking).then(() => {
+            alert('Código de rastreio copiado: ' + tracking);
+        }).catch(err => {
+            console.error('Erro ao copiar com Clipboard API:', err);
+            fallbackCopyTextToClipboard(tracking);
+        });
+    } else {
+        // Fallback para navegadores antigos ou HTTP
+        fallbackCopyTextToClipboard(tracking);
+    }
+}
+
+function fallbackCopyTextToClipboard(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    
+    // Evitar scroll automático
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+            alert('Código de rastreio copiado: ' + text);
+        } else {
+            alert('Falha ao copiar. Código: ' + text);
+        }
+    } catch (err) {
+        console.error('Erro no fallback de cópia:', err);
+        alert('Erro ao copiar. Código: ' + text);
+    }
+    
+    document.body.removeChild(textArea);
 }
 
 async function getEnviosAtivos() {
