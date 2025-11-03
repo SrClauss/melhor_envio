@@ -440,3 +440,17 @@ async def get_monitor_hours(request: Request):
     return {"start_hour": start_hour, "end_hour": end_hour}
 
 
+@router.post('/ded65439-becd-4c78-aeed-1f906ca541ff')
+async def forcar_extracao_rastreio_manual(request: Request):
+    """
+    Força a extração do rastreio atualizando o banco de dados, mas sem enviar WhatsApp.
+    """
+    from app import webhooks
+    try:
+        # Agendar a execução assíncrona em background
+        asyncio.create_task(webhooks.forcar_extracao_rastreio_async(request.app.state.db))
+        return {"message": "Extração forçada de rastreio agendada em background (sem WhatsApp)"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao agendar extração: {str(e)}")
+
+

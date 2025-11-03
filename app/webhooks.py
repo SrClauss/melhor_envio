@@ -659,7 +659,7 @@ def _sanitize_time_format(time_str):
 
 
 def _calculate_next_valid_execution(interval_minutes: int, db) -> datetime:
-    """Calcula a próxima execução válida DENTRO do horário de monitoramento permitido.
+    """Calcula a próxima execução válida DENTRO do horário de monitor
     
     IMPORTANTE: Horários de monitoramento são em BRASÍLIA, mas o cálculo retorna UTC.
     - Usuário configura: 06:00-23:00 BRT
@@ -936,6 +936,219 @@ def get_shipments_for_api(db):
         return shipments
     else:
         raise HTTPException(status_code=response.status_code, detail=response.text)
+def forcar_extracao_rastreio(db=None):
+    """
+    Força a extração do rastreio atualizando o banco de dados, mas sem enviar WhatsApp.
+    Similar à consultar_shipments, mas sem notificações.
+    """
+    if db is None:
+        db = rocksdbpy.open('database.db', rocksdbpy.Option())
+    
+    token = db.get(b"token:melhor_envio")
+    if not token:   
+        raise HTTPException(status_code=401, detail="Token do Melhor Envio não encontrado.")
+    token = token.decode('utf-8')
+
+    status = 'posted'
+    response = requests.get("https://melhorenvio.com.br/api/v2/me/orders", headers={
+        'Authorization': f'Bearer {token}'
+    }, params={
+        'status': status,
+        'page': 1})
+    shipments = []
+
+    if response.status_code == 200:
+        corrent_page = response.json().get('current_page')
+        shipments.extend(response.json().get('data', []))
+        status_code = response.status_code
+        
+        # Buscar todas as páginas
+        while status_code == 200:
+            response = requests.get("https://melhorenvio.com.br/api/v2/me/orders", headers={
+                'Authorization': f'Bearer {token}'
+            }, params={
+                'status': status,
+                'page': corrent_page + 1})
+            if response.status_code == 200:
+                corrent_page = response.json().get('current_page')
+                shipments.extend(response.json().get('data', []))
+            else:
+                status_code = response.status_code
+        
+        processed_count = 0
+        current_shipment_ids = set()
+        
+        for shipment in shipments:
+            shipment_id = shipment.get('id')
+            if not shipment_id:
+                continue
+                
+            # Manter registro dos IDs atuais
+            current_shipment_ids.add(shipment_id)
+                
+            # Extrair dados necessários
+            to_data = shipment.get('to', {})
+            nome = to_data.get('name', '')
+            telefone = to_data.get('phone', '')
+            
+            if not telefone:
+                print(f"Shipment {shipment_id} sem telefone do destinatário")
+                continue
+            
+            # Obter rastreamento atual usando API com retry para 429
+            codigo_rastreio = shipment.get('tracking')
+            if codigo_rastreio:
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        rastreio_detalhado = extrair_rastreio_api(codigo_rastreio)
+                    except Exception as e:
+                        rastreio_detalhado = f"Erro ao extrair rastreio: {e}"
+                    
+                    # Verificar se é erro 429
+                    if isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado and '429' in str(rastreio_detalhado['erro']):
+                        if attempt < max_retries - 1:
+                            sleep_time = random.uniform(10, 12)  # Pausa maior para rate limit
+                            print(f"[RATE LIMIT] Pausando por {sleep_time:.2f} segundos devido a 429 para {codigo_rastreio} (tentativa {attempt + 1}/{max_retries})")
+                            time.sleep(sleep_time)
+                            continue
+                        else:
+                            print(f"[RATE LIMIT] Máximo de tentativas atingido para {codigo_rastreio}")
+                    break  # Sai do loop se não for 429 ou última tentativa
+            else:
+                rastreio_detalhado = "Sem código de rastreio"
+            
+            # Verificar se existe entrada anterior no banco
+            key = f"etiqueta:{shipment_id}".encode('utf-8')
+            existing_data = db.get(key)
+            
+            # Preparar dados atuais e mesclar com existentes
+            # Carregar dados antigos se existirem
+            old_data = {}
+            try:
+                if existing_data:
+                    old_data = json.loads(existing_data.decode('utf-8'))
+            except Exception as e:
+                print(f"Erro ao processar dados antigos para {shipment_id}: {e}")
+
+            old_rastreio = old_data.get('rastreio_detalhado', '')
+
+            # Determinar se rastreio atual é erro
+            try:
+                is_error_rastreio = not isinstance(rastreio_detalhado, dict) or (isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado)
+            except Exception:
+                is_error_rastreio = True
+
+            if not existing_data:
+                print(f"[NOVO] Criando entrada para shipment {shipment_id}")
+
+            # Montar objeto a gravar: mesclar campos, garantir que 'tracking' seja salvo sempre que disponível
+            merged = dict(old_data) if isinstance(old_data, dict) else {}
+            merged['nome'] = nome
+            merged['telefone'] = telefone
+            # Salvar o código de rastreio do próprio objeto (tracking) sempre que presente
+            if codigo_rastreio:
+                merged['tracking'] = codigo_rastreio
+
+            # Só atualizar rastreio_detalhado quando for uma extração válida
+            if not is_error_rastreio:
+                eventos = rastreio_detalhado.get('eventos', [])
+                if eventos:
+                    ultimo_evento = eventos[0]  # Assumindo que o primeiro é o mais recente
+                    merged['rastreio_detalhado'] = {
+                        'codigo_original': rastreio_detalhado.get('codigo_original'),
+                        'status_atual': rastreio_detalhado.get('status_atual'),
+                        'ultimo_evento': ultimo_evento,
+                        'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
+                    }
+                else:
+                    merged['rastreio_detalhado'] = rastreio_detalhado
+
+            # Gravar merged no banco
+            try:
+                db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                print(f"Erro ao gravar dados para {shipment_id}: {e}")
+
+            # Se houve erro, registrar last_error
+            if is_error_rastreio:
+                print(f"[IGNORADO] Não atualizou rastreio_detalhado para {shipment_id} devido a erro: {rastreio_detalhado}")
+                try:
+                    last_error_key = f"etiqueta:{shipment_id}:last_error".encode('utf-8')
+                    last_error_value = json.dumps({
+                        "error": rastreio_detalhado,
+                        "timestamp": datetime.now().isoformat()
+                    }, ensure_ascii=False).encode('utf-8')
+                    db.set(last_error_key, last_error_value)
+                except Exception as e:
+                    print(f"Erro ao gravar last_error para {shipment_id}: {e}")
+            
+            # NÃO enviar notificação (diferente da consultar_shipments)
+            print(f"[EXTRAÇÃO] Rastreio extraído para {shipment_id} (sem WhatsApp)")
+            
+            processed_count += 1
+            
+            # Timeout aleatório entre 0.75 e 2 segundos entre shipments
+            time.sleep(random.uniform(1.9, 2.1))
+        
+        # Limpar shipments que não existem mais
+        removed_count = 0
+        try:
+            # Buscar todas as chaves que começam com "etiqueta:"
+            keys_to_remove = []
+            it = db.iterator()
+            for key, value in it:
+                try:
+                    key_str = key.decode('utf-8')
+                    if key_str.startswith('etiqueta:'):
+                        # Ignorar chaves auxiliares como :last_error
+                        if ':last_error' in key_str:
+                            continue
+                        
+                        shipment_id_in_db = key_str.replace('etiqueta:', '')
+                        if shipment_id_in_db not in current_shipment_ids:
+                            keys_to_remove.append(key)
+                except Exception as e:
+                    print(f"Erro ao processar chave durante limpeza: {e}")
+                    continue
+            
+            # Remover as chaves fora do iterator
+            for key in keys_to_remove:
+                try:
+                    key_str = key.decode('utf-8')
+                    shipment_id_in_db = key_str.replace('etiqueta:', '')
+                    
+                    # Remover chave principal
+                    db.delete(key)
+                    removed_count += 1
+                    
+                    # Remover chave :last_error associada, se existir
+                    last_error_key = f"etiqueta:{shipment_id_in_db}:last_error".encode('utf-8')
+                    try:
+                        db.delete(last_error_key)
+                    except:
+                        pass  # Chave não existe, ignorar
+                    
+                    print(f"[REMOVIDO] Shipment {shipment_id_in_db} não encontrado na API, removido do banco")
+                except Exception as e:
+                    print(f"Erro ao remover chave {key}: {e}")
+                    
+        except Exception as e:
+            print(f"Erro ao limpar shipments antigos: {e}")
+        
+        print(f"[RESUMO EXTRAÇÃO] Processados: {processed_count} shipments, Removidos: {removed_count}")
+        
+    else:
+        raise HTTPException(status_code=response.status_code, detail=response.text)
+async def forcar_extracao_rastreio_async(db=None):
+    """Wrapper async para forcar_extracao_rastreio que executa a função síncrona em um executor."""
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, forcar_extracao_rastreio, db)
+        print(f"[EXTRAÇÃO] Extração forçada executada em {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    except Exception as e:
+        print(f"[EXTRAÇÃO] ❌ Erro ao executar forcar_extracao_rastreio_async: {e}")
+        raise
 
 
 
