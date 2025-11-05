@@ -153,3 +153,9 @@ Thumbs.db
 tokens.txt
 secrets.txt
 config.local.*
+
+# Ignore local test/investigation scripts and temp DB copies used for testing
+/scripts/test_simulate_notifications.py
+/scripts/investigate_shipment.py
+/scripts/investigate_failures.py
+/tmp/melhorenvio-test-*

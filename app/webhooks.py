@@ -525,26 +525,60 @@ def consultar_shipments(db=None):
                 print(f"Shipment {shipment_id} sem telefone do destinatário")
                 continue
             
-            # Obter rastreamento atual usando API com retry para 429
+            # Obter rastreamento atual usando API com retries controlados.
+            # Estratégia:
+            # - Retentar para casos transitórios: HTTP 429 (rate limit), timeouts, e erros conhecidos como PARCEL_NOT_FOUND
+            # - Pausar um pouco entre tentativas (backoff simples)
+            # - Não enviar notificação caso a extração não retorne eventos válidos (já tratado mais adiante)
             codigo_rastreio = shipment.get('tracking')
             if codigo_rastreio:
-                max_retries = 3
-                for attempt in range(max_retries):
+                max_retries = int(os.getenv('WEBHOOKS_MAX_RETRIES', 3))
+                rastreio_detalhado = None
+                for attempt in range(1, max_retries + 1):
                     try:
                         rastreio_detalhado = extrair_rastreio_api(codigo_rastreio)
                     except Exception as e:
-                        rastreio_detalhado = f"Erro ao extrair rastreio: {e}"
-                    
-                    # Verificar se é erro 429
-                    if isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado and '429' in str(rastreio_detalhado['erro']):
-                        if attempt < max_retries - 1:
-                            sleep_time = random.uniform(10, 12)  # Pausa maior para rate limit
-                            print(f"[RATE LIMIT] Pausando por {sleep_time:.2f} segundos devido a 429 para {codigo_rastreio} (tentativa {attempt + 1}/{max_retries})")
+                        # Normalizar para dict com 'erro' para facilitar análise
+                        rastreio_detalhado = {"erro": f"Erro ao extrair rastreio: {e}"}
+
+                    # Se veio um dict sem 'erro' e com eventos, considerar sucesso imediato
+                    if isinstance(rastreio_detalhado, dict) and 'erro' not in rastreio_detalhado and rastreio_detalhado.get('eventos'):
+                        break
+
+                    # Inspecionar texto do erro para decidir retry
+                    try:
+                        txt = json.dumps(rastreio_detalhado)
+                    except Exception:
+                        txt = str(rastreio_detalhado)
+                    txt_low = txt.lower()
+
+                    # Retry para rate limit (429)
+                    if ('429' in txt_low) or ('rate limit' in txt_low):
+                        if attempt < max_retries:
+                            sleep_time = random.uniform(10, 12)
+                            print(f"[RATE LIMIT] Pausando por {sleep_time:.2f}s devido a 429 para {codigo_rastreio} (tentativa {attempt}/{max_retries})")
                             time.sleep(sleep_time)
                             continue
                         else:
                             print(f"[RATE LIMIT] Máximo de tentativas atingido para {codigo_rastreio}")
-                    break  # Sai do loop se não for 429 ou última tentativa
+                            break
+
+                    # Retry para erros transitórios / parcel not found / timeout
+                    if ('parcel_not_found' in txt_low) or ('parcel not' in txt_low) or ('not found' in txt_low) or ('timeout' in txt_low) or ('timed out' in txt_low):
+                        if attempt < max_retries:
+                            sleep_time = random.uniform(1, 3)
+                            print(f"[RETRY] Pausando por {sleep_time:.2f}s antes de nova tentativa para {codigo_rastreio} (tentativa {attempt}/{max_retries})")
+                            time.sleep(sleep_time)
+                            continue
+                        else:
+                            print(f"[RETRY] Máximo de tentativas atingido para {codigo_rastreio}")
+                            break
+
+                    # Caso não seja um erro identificável para retry, sair
+                    break
+                # Se não obteve resultado, normalizar texto
+                if rastreio_detalhado is None:
+                    rastreio_detalhado = {"erro": "Sem resultado da extração"}
             else:
                 rastreio_detalhado = "Sem código de rastreio"
             
@@ -573,6 +607,10 @@ def consultar_shipments(db=None):
 
             # Verificar mudança para notificação (apenas quando rastreio válido)
             if not is_error_rastreio:
+                # Notificar somente quando houver eventos e o último evento for diferente
+                # do que está salvo no banco. Evita enviar notificações do tipo
+                # "Sem movimentação" repetidamente quando a API retorna estruturas
+                # vazias ou apenas metadados que mudaram sem evento novo.
                 eventos = rastreio_detalhado.get('eventos', [])
                 if eventos:
                     ultimo_evento = eventos[0]
@@ -580,9 +618,6 @@ def consultar_shipments(db=None):
                     if ultimo_evento != old_ultimo:
                         should_notify = True
                         print(f"[MUDANÇA] {shipment_id}: rastreio atualizado")
-                elif rastreio_detalhado != old_rastreio:
-                    should_notify = True
-                    print(f"[MUDANÇA] {shipment_id}: rastreio atualizado")
 
             if not existing_data:
                 print(f"[NOVO] Criando entrada para shipment {shipment_id}")
