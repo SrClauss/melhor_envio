@@ -91,7 +91,7 @@ app.state.db = abrir_banco_de_dados()
 # Garantir usuário admin e atualizar a senha para o novo padrão
 admin_key = b"user:admin"
 user = "admin"
-new_password = "b0hi1%I958"
+new_password = "    "
 hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
 # Sempre atualizar/definir a senha do admin para o novo valor
 app.state.db.set(b"user:" + user.encode('utf-8'), hashed_password)
