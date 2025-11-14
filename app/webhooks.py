@@ -605,6 +605,15 @@ def consultar_shipments(db=None):
             except Exception:
                 is_error_rastreio = True
 
+            # Determinar se vamos enviar a primeira mensagem (ao criar a etiqueta ou se ainda não foi enviada)
+            is_first_notify = False
+            try:
+                # Se não existe old_data ou flag 'first_message_sent' não estiver presente/True
+                if not old_data.get('first_message_sent'):
+                    is_first_notify = True
+            except Exception:
+                is_first_notify = True
+
             # Verificar mudança para notificação (apenas quando rastreio válido)
             if not is_error_rastreio:
                 # Notificar somente quando houver eventos e o último evento for diferente
@@ -618,6 +627,12 @@ def consultar_shipments(db=None):
                     if ultimo_evento != old_ultimo:
                         should_notify = True
                         print(f"[MUDANÇA] {shipment_id}: rastreio atualizado")
+
+            # Enviar primeira mensagem para etiquetas novas ou antigas sem a flag
+            # A condição is_first_notify garante que enviaremos no primeiro cron job
+            # mesmo quando não há eventos / rastreio válido.
+            if is_first_notify:
+                should_notify = True
 
             if not existing_data:
                 print(f"[NOVO] Criando entrada para shipment {shipment_id}")
@@ -671,6 +686,14 @@ def consultar_shipments(db=None):
                     enviar_para_whatsapp(mensagem, telefone)
                     notifications_sent += 1
                     print(f"[WHATSAPP] Notificação enviada para {telefone}")
+                    # Se for o primeiro envio, gravar flag para evitar reenvio da primeira mensagem
+                    if is_first_notify:
+                        try:
+                            merged['first_message_sent'] = True
+                            db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
+                            print(f"[FIRST_MESSAGE] Marcado first_message_sent para {shipment_id}")
+                        except Exception as e:
+                            print(f"Erro ao marcar first_message_sent para {shipment_id}: {e}")
                 except Exception as e:
                     print(f"Falha ao enviar WhatsApp para {telefone}: {e}")
             
