@@ -608,8 +608,24 @@ def consultar_shipments(db=None):
             # Determinar se vamos enviar a primeira mensagem (ao criar a etiqueta ou se ainda não foi enviada)
             is_first_notify = False
             try:
-                # Se não existe old_data ou flag 'first_message_sent' não estiver presente/True
-                if not old_data.get('first_message_sent'):
+                first_message_sent = old_data.get('first_message_sent', False)
+                
+                # Para dados antigos sem o flag, verificar se já teve atividade
+                if not first_message_sent and old_data:
+                    # Se tem rastreio processado ou eventos, assumir que já foi notificado
+                    rastreio_completo = old_data.get('rastreio_completo', '')
+                    rastreio_detalhado = old_data.get('rastreio_detalhado', {})
+                    events = rastreio_detalhado.get('eventos', []) if isinstance(rastreio_detalhado, dict) else []
+                    
+                    has_processed_tracking = (rastreio_completo and 
+                                            rastreio_completo not in ['Sem dados de rastreio', 'Ainda não processado'])
+                    has_events = len(events) > 0
+                    
+                    if has_processed_tracking or has_events:
+                        first_message_sent = True  # Tratar como já notificado
+                
+                # Se não foi enviado ainda, marcar para enviar primeira mensagem
+                if not first_message_sent:
                     is_first_notify = True
             except Exception:
                 is_first_notify = True
