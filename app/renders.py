@@ -173,4 +173,8 @@ async def salvar_mensagem_template(request: Request, template: str = Form(...), 
     return RedirectResponse(url="/mensagem", status_code=303)
 
 
+@router.get("/usuarios", response_class=HTMLResponse)
+async def render_usuarios_template(request: Request, current_user: str = Depends(get_current_user)):
+    """Renderiza a página de gerenciamento de usuários."""
+    return templates.TemplateResponse("usuarios.html", {"request": request, "username": current_user})
 

