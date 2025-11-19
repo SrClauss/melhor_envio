@@ -10,7 +10,7 @@ body, body.login-page {
 
 /* Página de login full-bleed */
 body.login-page {
-    background: url('/img/background.png') no-repeat center center fixed;
+    background: url('/img/background_.png') no-repeat center center fixed;
     background-size: cover;
 }
 
