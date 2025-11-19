@@ -597,9 +597,11 @@ async def list_users(request: Request):
         for key, _ in it:
             try:
                 key_str = key.decode('utf-8')
-                if key_str.startswith('user:'):
+                # Filtrar apenas chaves que são exatamente user:<username> (sem dois pontos no username)
+                if key_str.startswith('user:') and key_str.count(':') == 1:
                     username = key_str.replace('user:', '')
-                    users.append({"username": username})
+                    if username:  # Garantir que não está vazio
+                        users.append({"username": username})
             except:
                 continue
 
