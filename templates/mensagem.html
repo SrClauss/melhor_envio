@@ -21,10 +21,17 @@
                         <li><code>[status]</code>, <code>[rota]</code>, <code>[localizacao]</code>, <code>[data]</code> Campos individuais</li>
                     </ul>
 
+                    <style>
+                        /* Forçar estilos escuros/glass locais para esta página */
+                        .mensagem-textarea { background: rgba(255,255,255,0.02) !important; color: var(--text) !important; border: 1px solid var(--border) !important; }
+                        .mensagem-list code { background: rgba(255,255,255,0.03); color: var(--text); padding: 2px 6px; border-radius:6px; }
+                        .mensagem-list li { color: var(--muted-text); }
+                    </style>
+
                     <form method="post" action="/mensagem">
                         <div class="mb-3">
                             <label for="template" class="form-label">Template</label>
-                            <textarea id="template" name="template" class="form-control" rows="16" required>{{ template_text }}</textarea>
+                            <textarea id="template" name="template" class="form-control mensagem-textarea" rows="16" required>{{ template_text }}</textarea>
                         </div>
                         <div class="d-flex gap-2">
                             <button type="submit" class="btn btn-primary">Salvar</button>

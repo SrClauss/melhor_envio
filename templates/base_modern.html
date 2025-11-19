@@ -8,146 +8,149 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
-            --primary-color: rgba(255, 255, 255, 0.15);
-            --secondary-color: rgba(0, 0, 0, 0.5);
-            --text-color: #ffffff;
-            --text-muted: rgba(255, 255, 255, 0.7);
-            --border-color: rgba(255, 255, 255, 0.2);
-            --hover-color: rgba(255, 255, 255, 0.3);
+            --bg-1: #0f1720; /* background base */
+            --bg-2: rgba(18,24,30,0.6); /* panels */
+            --glass: rgba(255,255,255,0.04);
+            --glass-strong: rgba(255,255,255,0.06);
+            --muted: rgba(255,255,255,0.7);
+            --accent: rgba(99,102,241,0.12);
+            --border: rgba(255,255,255,0.06);
+            --text: #e6eef8;
+            --muted-text: rgba(230,238,248,0.75);
+            --success: rgba(34,197,94,0.12);
+            --danger: rgba(220,38,38,0.12);
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
+
+        html,body { height:100%; }
 
         body {
-            font-family: Arial, sans-serif;
-            background: linear-gradient(135deg, #1a1a1a, #333);
-            color: var(--text-color);
-            min-height: 100vh;
+            margin:0;
+            font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+            background: radial-gradient(1200px 600px at 10% 10%, rgba(99,102,241,0.06), transparent),
+                        linear-gradient(180deg, var(--bg-1), #0b1220 70%);
+            color: var(--text);
+            -webkit-font-smoothing:antialiased;
         }
 
-        /* Glassmorphic Card */
+        /* Global glass card */
         .glass-card {
-            background: var(--primary-color);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            border: 1px solid var(--border-color);
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            background: linear-gradient(180deg, var(--glass), rgba(255,255,255,0.02));
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px) saturate(120%);
+            -webkit-backdrop-filter: blur(10px) saturate(120%);
+            border-radius: 14px;
             padding: 20px;
-            color: var(--text-color);
+            color: var(--text);
         }
 
-        .glass-card h1, .glass-card h2, .glass-card h3, .glass-card h4, .glass-card h5 {
-            color: var(--text-color);
+        .card, .modal-content {
+            background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+            border: 1px solid var(--border);
+            color: var(--text);
+            box-shadow: 0 6px 18px rgba(2,6,23,0.6);
         }
+
+        h1,h2,h3,h4,h5 { color: var(--text); }
+        p, label, small { color: var(--muted-text); }
 
         /* Buttons */
         .btn {
-            border-radius: 30px;
-            transition: all 0.3s ease;
+            transition: all .18s ease;
+            border-radius: 10rem;
+            border: 1px solid transparent;
         }
 
         .btn-primary {
-            background: var(--hover-color);
-            border: 1px solid var(--border-color);
+            background: linear-gradient(90deg, rgba(99,102,241,0.16), rgba(79,70,229,0.12));
+            color: #fff;
+            border-color: rgba(99,102,241,0.2);
         }
 
-        .btn-primary:hover {
-            background: var(--text-muted);
+        .btn-outline-secondary {
+            background: transparent;
+            color: var(--muted-text);
+            border: 1px solid rgba(255,255,255,0.04);
         }
 
         /* Sidebar */
         .sidebar {
-            background: var(--secondary-color);
-            color: var(--text-color);
-            height: 100vh;
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 250px;
-            padding: 20px;
-            overflow-y: auto;
+            top:0; left:0; bottom:0;
+            width: 240px;
+            padding: 22px;
+            display:flex;
+            flex-direction:column;
+            gap: 12px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+            border-right: 1px solid rgba(255,255,255,0.02);
+            backdrop-filter: blur(10px);
+            z-index: 40;
         }
 
-        .sidebar a {
-            color: var(--text-muted);
-            text-decoration: none;
-            display: block;
-            padding: 10px;
-            border-radius: 10px;
-            transition: all 0.3s ease;
-        }
+        .sidebar-header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .sidebar-header h3 { margin:0; font-size:1.05rem; color:var(--text); }
 
-        .sidebar a:hover {
-            background: var(--hover-color);
-            color: var(--text-color);
-        }
+        .sidebar-menu { margin-top:8px; display:flex; flex-direction:column; gap:6px; }
+        .menu-item { padding:10px 12px; border-radius:10px; color:var(--muted-text); text-decoration:none; display:flex; gap:10px; align-items:center; }
+        .menu-item i { width:20px; text-align:center; }
+        .menu-item:hover { background: rgba(255,255,255,0.02); color:var(--text); }
 
-        .sidebar.collapsed {
-            width: 80px;
-        }
+        .sidebar-footer { margin-top:auto; display:flex; gap:8px; align-items:center; }
+        .logout-form { margin:0; }
 
-        .sidebar.collapsed .menu-item span {
-            display: none;
+        .logout-btn {
+            width:100%;
+            display:flex; align-items:center; justify-content:center;
+            padding:8px 10px; border-radius:10px; background:transparent; border:1px solid rgba(255,255,255,0.03);
+            color:var(--muted-text);
         }
+        .logout-btn:hover { background: rgba(220,38,38,0.08); color:#fff; border-color: rgba(220,38,38,0.18); }
 
-        /* Main Content */
-        .main-content {
-            margin-left: 250px;
-            padding: 20px;
-            transition: margin-left 0.3s ease;
-        }
+        /* Main content area */
+        .main-content { margin-left: 260px; padding: 28px; min-height:100vh; }
+        .main-content.expanded { margin-left: 90px; }
 
-        .main-content.expanded {
-            margin-left: 80px;
+        /* Forms and inputs */
+        input.form-control, textarea.form-control, select.form-control {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.04);
+            color: var(--text);
+            border-radius: 8px;
+            padding: 10px 12px;
         }
+        input::placeholder, textarea::placeholder { color: rgba(230,238,248,0.45); }
 
         /* Alerts */
-        .alert {
-            border-radius: 10px;
-            backdrop-filter: blur(5px);
-            border: 1px solid var(--border-color);
-        }
+        .alert { background: linear-gradient(180deg, rgba(255,255,255,0.015), rgba(255,255,255,0.01)); border:1px solid rgba(255,255,255,0.03); color:var(--muted-text); }
+        .alert-success { background: var(--success); color:#bff3d0; }
+        .alert-danger { background: var(--danger); color:#ffc9c9; }
 
-        .alert-danger {
-            background: rgba(255, 0, 0, 0.2);
-            color: #ff4d4d;
-        }
+        /* Center helpers */
+        .center-viewport { display:flex; align-items:center; justify-content:center; min-height:calc(100vh - 40px); }
 
-        .alert-success {
-            background: rgba(0, 255, 0, 0.2);
-            color: #4dff4d;
-        }
-
-        /* Forms */
-        input, textarea {
-            background: var(--primary-color);
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            border-radius: 10px;
-            padding: 10px;
-        }
-
-        input:focus, textarea:focus {
-            outline: none;
-            border-color: var(--hover-color);
+        /* small screens */
+        @media (max-width: 768px) {
+            .sidebar { position:relative; width:100%; height:auto; flex-direction:row; gap:6px; }
+            .main-content { margin-left:0; padding:16px; }
         }
     </style>
 </head>
 <body>
     <!-- Mobile Toggle -->
-    <button class="mobile-toggle d-md-none" onclick="toggleSidebar()">
+    <button class="mobile-toggle d-md-none" onclick="toggleSidebar()" style="position:fixed;left:12px;top:12px;z-index:60;background:transparent;border:1px solid rgba(255,255,255,0.03);padding:8px;border-radius:10px;color:var(--text)">
         <i class="fas fa-bars"></i>
     </button>
 
     <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
         <div class="sidebar-header">
-            <h3>Melhor Envio</h3>
-            <button class="toggle-btn" onclick="toggleSidebar()">
+            <div style="display:flex;align-items:center;gap:10px">
+                <img src="/img/logo_.png" alt="logo" width="36" style="border-radius:6px;">
+                <h3>Melhor Envio</h3>
+            </div>
+            <button class="toggle-btn" onclick="toggleSidebar()" style="background:transparent;border:0;color:var(--muted-text)">
                 <i class="fas fa-chevron-left"></i>
             </button>
         </div>
@@ -167,6 +170,12 @@
             <a href="/usuarios" class="menu-item">
                 <i class="fas fa-users"></i> <span>Usuários</span>
             </a>
+        </div>
+
+        <div class="sidebar-footer">
+            <form class="logout-form" action="/logout" method="POST">
+                <button class="logout-btn" type="submit"><i class="fas fa-sign-out-alt" style="margin-right:8px"></i> Sair</button>
+            </form>
         </div>
     </div>
 

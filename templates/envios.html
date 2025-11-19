@@ -78,7 +78,7 @@ function displayEnvios(envios) {
     
     if (!envios || !envios.shipments || envios.shipments.length === 0) {
         container.innerHTML = `
-            <div class="alert alert-warning">
+                <div class="alert" style="background: rgba(255,255,255,0.02); color:var(--muted-text);">
                 <i class="bi bi-exclamation-triangle"></i> 
                 Nenhum envio encontrado com status "posted"
             </div>
@@ -88,8 +88,8 @@ function displayEnvios(envios) {
 
     let html = `
         <div class="table-responsive">
-            <table class="table table-striped table-hover">
-                <thead class="table-dark">
+                <table class="table table-hover">
+                    <thead style="background: rgba(255,255,255,0.02); color:var(--muted-text);">
                     <tr>
                         <th>Transportadora</th>
                         <th>Código Rastreio</th>
@@ -148,8 +148,8 @@ function displayEnvios(envios) {
                 <td>${envio.nome || 'N/A'}</td>
                 <td><small>${envio.telefone || 'N/A'}</small></td>
                 <td>
-                    <button class="btn btn-sm btn-outline-info" onclick="openRastreioModal('${envio.id}')">
-                        <i class="bi bi-info-circle"></i> Ver detalhes
+                    <button class="btn btn-sm btn-outline-secondary" onclick="openRastreioModal('${envio.id}')">
+                            <i class="bi bi-info-circle"></i> Ver detalhes
                     </button>
                 </td>
                 <td>
@@ -339,7 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="modal-body">
                 <div class="mb-3">
                     <h6>Mensagem para WhatsApp</h6>
-                    <div id="rastreioWhatsappText" style="white-space: pre-wrap; background:#f8f9fa; padding:10px; border-radius:4px;"></div>
+                <div id="rastreioWhatsappText" style="white-space: pre-wrap; background: rgba(255,255,255,0.02); padding:10px; border-radius:6px; color:var(--text);"></div>
                 </div>
 
                 <div class="mb-3">
