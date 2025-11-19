@@ -30,3 +30,14 @@
     </div>
 </div>
 {% endblock %}
+
+{% block sidebar %}{% endblock %}
+
+{% block extra_js %}
+<style>
+    /* When sidebar is removed on login, make main content full width */
+    #mainContent { margin-left: 0 !important; padding-top: 40px; }
+    body { overflow:hidden; }
+    .mobile-toggle { display:none !important; }
+</style>
+{% endblock %}

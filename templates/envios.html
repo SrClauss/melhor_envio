@@ -4,6 +4,35 @@
 
 {% block content %}
 <div class="glass-card">
+    <style>
+        /* Tabela de envios: colunas com larguras fixas para melhor legibilidade no tema escuro */
+        .envios-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+        .envios-table thead th { font-weight: 600; color: var(--muted-text); }
+        .envios-table th:nth-child(1){ width:14%; }
+        .envios-table th:nth-child(2){ width:16%; }
+        .envios-table th:nth-child(3){ width:40%; }
+        .envios-table th:nth-child(4){ width:12%; }
+        .envios-table th:nth-child(5){ width:10%; }
+        .envios-table th:nth-child(6){ width:8%; }
+        .envios-table td { padding: 12px 16px; vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted-text); }
+        .envios-table td.destinatario { white-space: normal; max-width: 100%; }
+        .envios-table .codigo { color: var(--muted-text); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', 'Courier New', monospace; font-size: .95rem; }
+        .envios-table .actions .btn { border-radius: 8px; padding: 6px 8px; }
+
+        /* Small screens: esconder colunas menos importantes e usar linha expansível (accordion) */
+        @media (max-width: 900px) {
+            .envios-table th:nth-child(4), .envios-table td:nth-child(4),
+            .envios-table th:nth-child(5), .envios-table td:nth-child(5) { display:none; }
+            .envios-table th:nth-child(1){ width:18%; }
+            .envios-table th:nth-child(2){ width:30%; }
+            .envios-table th:nth-child(3){ width:45%; }
+            .envios-table td { font-size: .95rem; }
+            .envios-details-row td { display:block; }
+        }
+
+        .envios-details-row td { padding:10px 16px; background: rgba(255,255,255,0.01); color:var(--muted-text); }
+        .envios-details-row .detail-label { font-weight:600; color:var(--text); margin-right:8px; }
+    </style>
     <div class="row">
         <div class="col-12">
             <div class="card">
@@ -87,19 +116,19 @@ function displayEnvios(envios) {
     }
 
     let html = `
-        <div class="table-responsive">
-                <table class="table table-hover">
-                    <thead style="background: rgba(255,255,255,0.02); color:var(--muted-text);">
-                    <tr>
-                        <th>Transportadora</th>
-                        <th>Código Rastreio</th>
-                        <th>Destinatário</th>
-                        <th>Telefone</th>
-                        <th>Status</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody>
+            <div class="table-responsive" style="background:transparent;">
+                <table class="table table-borderless envios-table" style="color:var(--text);">
+                    <thead style="background: rgba(255,255,255,0.03); color:var(--muted-text); border-bottom:1px solid rgba(255,255,255,0.04);">
+                        <tr>
+                            <th>Transportadora</th>
+                            <th>Código Rastreio</th>
+                            <th>Destinatário</th>
+                            <th>Telefone</th>
+                            <th>Status</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody style="color:var(--muted-text);">
     `;
 
     envios.shipments.forEach(envio => {
@@ -137,29 +166,46 @@ function displayEnvios(envios) {
         const codigoRastreio = envio.tracking || 'N/A';
         const displayTransportadora = servicoTipo ? `${transportadora} (${servicoTipo})` : transportadora;
 
+        const detailsId = 'details-' + String(envio.id).replace(/[^a-zA-Z0-9-_:.]/g, '');
+
         html += `
-            <tr>
-                <td><strong>${displayTransportadora}</strong></td>
-                <td>
-                    <button class="btn btn-outline-secondary btn-sm" onclick="copyTrackingById('${envio.id}')" title="Copiar código">
-                        <i class="bi bi-clipboard"></i> ${codigoRastreio}
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.03);">
+                <td style="padding:12px 16px;"><strong style="color:var(--text);">${displayTransportadora}</strong></td>
+                <td style="padding:12px 16px;">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="copyTrackingById('${envio.id}')" title="Copiar código" aria-label="Copiar código">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                    <span class="codigo" data-bs-toggle="tooltip" title="${codigoRastreio}" style="margin-left:8px; color:var(--muted-text);">${codigoRastreio}</span>
+                </td>
+                <td class="destinatario" style="padding:12px 16px;color:var(--text);">${envio.nome || 'N/A'}</td>
+                <td style="padding:12px 16px; color:var(--muted-text);">${envio.telefone || 'N/A'}</td>
+                <td style="padding:12px 16px; color:var(--muted-text);">
+                    <button class="btn btn-sm btn-outline-secondary d-none d-md-inline" onclick="openRastreioModal('${envio.id}')" title="Ver detalhes" aria-label="Ver detalhes">
+                        <i class="fas fa-info-circle"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary d-md-none" data-bs-toggle="collapse" data-bs-target="#${detailsId}" aria-expanded="false" aria-controls="${detailsId}" data-target="#${detailsId}">
+                        <i class="fas fa-angle-down chev-rot"></i>
                     </button>
                 </td>
-                <td>${envio.nome || 'N/A'}</td>
-                <td><small>${envio.telefone || 'N/A'}</small></td>
-                <td>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="openRastreioModal('${envio.id}')">
-                            <i class="bi bi-info-circle"></i> Ver detalhes
-                    </button>
+                <td style="padding:12px 16px;">
+                    <div class="btn-group btn-group-sm actions" role="group">
+                        <button class="btn btn-sm btn-outline-success" onclick="enviarWhatsApp('${envio.id}')" title="Enviar WhatsApp" aria-label="Enviar WhatsApp"><i class="fas fa-paper-plane"></i></button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="openRastreioModal('${envio.id}')" title="Ver detalhes" aria-label="Ver detalhes"><i class="fas fa-eye"></i></button>
+                    </div>
                 </td>
-                <td>
-                    <div class="btn-group btn-group-sm" role="group">
-                        <button class="btn btn-outline-primary" onclick="openRastreioModal('${envio.id}')" title="Ver rastreamento">
-                            <i class="bi bi-eye"></i>
-                        </button>
-                        <button class="btn btn-outline-success" onclick="enviarWhatsApp('${envio.id}')" title="Enviar WhatsApp">
-                            <i class="bi bi-whatsapp"></i>
-                        </button>
+            </tr>
+
+            <tr class="envios-details-row collapse" id="${detailsId}">
+                <td colspan="6">
+                    <div style="display:flex;flex-direction:column;gap:6px;">
+                        <div><span class="detail-label">Código:</span><span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace;">${codigoRastreio}</span></div>
+                        <div><span class="detail-label">Telefone:</span><span>${envio.telefone || 'N/A'}</span></div>
+                        <div><span class="detail-label">Status:</span><span>${envio.rastreio_status || 'N/A'}</span></div>
+                        <div class="mt-2">
+                            <button class="btn btn-sm btn-outline-success me-2" onclick="enviarWhatsApp('${envio.id}')"><i class="fas fa-paper-plane"></i> Enviar</button>
+                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="copyTrackingById('${envio.id}')"><i class="fas fa-copy"></i> Copiar</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="openRastreioModal('${envio.id}')"><i class="fas fa-eye"></i> Ver</button>
+                        </div>
                     </div>
                 </td>
             </tr>
@@ -179,6 +225,37 @@ function displayEnvios(envios) {
     `;
     
     container.innerHTML = html;
+    // Inicializar interações (tooltips + collapse) do Bootstrap após renderizar a tabela
+    try {
+        initEnviosInteractions();
+    } catch(e) {
+        // ignore
+    }
+}
+
+function initEnviosInteractions(){
+    // Tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
+
+    // Collapse listeners to rotate the chevron icon
+    var details = document.querySelectorAll('.envios-details-row');
+    details.forEach(function(detailEl){
+        var id = detailEl.id;
+        if(!id) return;
+        var trigger = document.querySelector('[data-bs-target="#' + id + '"]');
+        if(!trigger) return;
+        var icon = trigger.querySelector('.chev-rot');
+        // remove any previous listeners
+        detailEl.addEventListener('shown.bs.collapse', function(){
+            if(icon) icon.classList.add('rotated');
+        });
+        detailEl.addEventListener('hidden.bs.collapse', function(){
+            if(icon) icon.classList.remove('rotated');
+        });
+    });
 }
 // Abre modal com JSON do rastreio e a mensagem WhatsApp gerada
 function openRastreioModal(envioId) {

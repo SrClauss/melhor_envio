@@ -130,17 +130,56 @@
         /* Center helpers */
         .center-viewport { display:flex; align-items:center; justify-content:center; min-height:calc(100vh - 40px); }
 
+        /* hamburger / mobile toggle (glass, larger hit area) */
+        .hamburger-btn {
+            position: fixed;
+            left: 12px;
+            top: 12px;
+            z-index: 70;
+            background: var(--glass-strong);
+            border: 1px solid var(--border);
+            padding: 10px;
+            border-radius: 12px;
+            color: var(--text);
+            width: 44px;
+            height: 44px;
+            display:flex; align-items:center; justify-content:center;
+            box-shadow: 0 8px 20px rgba(2,6,23,0.45);
+            transition: transform .15s ease, background .12s ease;
+        }
+        .hamburger-btn i { font-size:18px; }
+        .hamburger-btn:hover { transform: translateY(-2px); background: rgba(255,255,255,0.06); }
+        .hamburger-btn:focus { outline: 2px solid rgba(99,102,241,0.22); outline-offset: 2px; }
+
         /* small screens */
         @media (max-width: 768px) {
             .sidebar { position:relative; width:100%; height:auto; flex-direction:row; gap:6px; }
             .main-content { margin-left:0; padding:16px; }
+            /* Slightly reposition hamburger when the mobile header is present */
+            .hamburger-btn { left: 10px; top: 10px; }
+            /* Mobile: hide default sidebar, show only when 'mobile-visible' is added */
+            .sidebar { display:none; }
+            .sidebar.mobile-visible {
+                display:flex;
+                position:fixed;
+                inset:0;
+                width:auto;
+                height:100vh;
+                padding:28px;
+                flex-direction:column;
+                gap:12px;
+                z-index:80;
+                box-shadow: 0 20px 60px rgba(2,6,23,0.7);
+            }
+            .hamburger-btn.hidden { opacity:0; pointer-events:none; transform: translateY(-6px) scale(.95); transition: opacity .12s ease, transform .12s ease; }
         }
     </style>
 </head>
 <body>
+    {% block sidebar %}
     <!-- Mobile Toggle -->
-    <button class="mobile-toggle d-md-none" onclick="toggleSidebar()" style="position:fixed;left:12px;top:12px;z-index:60;background:transparent;border:1px solid rgba(255,255,255,0.03);padding:8px;border-radius:10px;color:var(--text)">
-        <i class="fas fa-bars"></i>
+    <button class="mobile-toggle hamburger-btn d-md-none" onclick="toggleSidebar()" aria-label="Abrir menu" title="Menu" aria-controls="sidebar" aria-expanded="false">
+        <i class="fas fa-bars" aria-hidden="true"></i>
     </button>
 
     <!-- Sidebar -->
@@ -178,7 +217,7 @@
             </form>
         </div>
     </div>
-
+    {% endblock %}
     <!-- Main Content -->
     <div class="main-content" id="mainContent">
         {% block content %}{% endblock %}
@@ -190,9 +229,60 @@
         function toggleSidebar() {
             const sidebar = document.getElementById('sidebar');
             const mainContent = document.getElementById('mainContent');
-            sidebar.classList.toggle('collapsed');
-            mainContent.classList.toggle('expanded');
+            const btn = document.querySelector('.hamburger-btn');
+            const icon = btn ? btn.querySelector('i') : null;
+            const isMobile = window.matchMedia('(max-width: 768px)').matches;
+
+            if (isMobile) {
+                // Mobile behavior: show overlay sidebar
+                sidebar.classList.toggle('mobile-visible');
+                const visible = sidebar.classList.contains('mobile-visible');
+                if (btn) {
+                    btn.setAttribute('aria-expanded', visible ? 'true' : 'false');
+                    btn.title = visible ? 'Fechar menu' : 'Abrir menu';
+                    if (icon) {
+                        icon.classList.remove(visible ? 'fa-bars' : 'fa-times');
+                        icon.classList.add(visible ? 'fa-times' : 'fa-bars');
+                    }
+                    // hide the hamburger when menu is visible to avoid overlap; sidebar has its own close control
+                    if (visible) btn.classList.add('hidden'); else btn.classList.remove('hidden');
+                }
+            } else {
+                // Desktop/minified behavior: collapse width
+                sidebar.classList.toggle('collapsed');
+                mainContent.classList.toggle('expanded');
+                if (btn) {
+                    const collapsed = sidebar.classList.contains('collapsed');
+                    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+                    btn.title = collapsed ? 'Abrir menu' : 'Fechar menu';
+                    if (icon) {
+                        icon.classList.remove('fa-times');
+                        icon.classList.add('fa-bars');
+                    }
+                }
+            }
         }
+
+        // Close mobile sidebar when a menu item is clicked (improves UX on small screens)
+        document.addEventListener('DOMContentLoaded', function(){
+            var items = document.querySelectorAll('.menu-item');
+            var btn = document.querySelector('.hamburger-btn');
+            items.forEach(function(it){
+                it.addEventListener('click', function(){
+                    if(window.matchMedia('(max-width: 768px)').matches){
+                        var sidebar = document.getElementById('sidebar');
+                        sidebar.classList.remove('mobile-visible');
+                        if(btn){
+                            btn.setAttribute('aria-expanded', 'false');
+                            btn.title = 'Abrir menu';
+                            btn.classList.remove('hidden');
+                            var ic = btn.querySelector('i');
+                            if(ic){ ic.classList.remove('fa-times'); ic.classList.add('fa-bars'); }
+                        }
+                    }
+                });
+            });
+        });
     </script>
     {% block extra_js %}{% endblock %}
 </body>
