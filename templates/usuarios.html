@@ -1,507 +1,281 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gerenciamento de Usuários - Melhor Envio</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        :root {
-            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        }
+{% extends "base_modern.html" %}
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+{% block title %}Gerenciamento de Usuários - Melhor Envio{% endblock %}
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+    <h1><i class="fas fa-users-cog"></i> Gerenciamento de Usuários</h1>
+    <p>Gerencie os administradores do sistema</p>
+</div>
 
-        /* Glassmorphism Container */
-        .glass-container {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border-radius: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-            padding: 30px;
-            margin-bottom: 30px;
-        }
+<!-- Alert Area -->
+<div id="alertArea"></div>
 
-        /* Header */
-        .page-header {
-            color: white;
-            margin-bottom: 30px;
-        }
-
-        .page-header h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 10px;
-        }
-
-        .page-header p {
-            opacity: 0.9;
-            font-size: 1.1rem;
-        }
-
-        /* Navigation */
-        .nav-bar {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 15px 20px;
-            margin-bottom: 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-
-        .nav-btn {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            padding: 8px 20px;
-            border-radius: 10px;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            font-weight: 500;
-        }
-
-        .nav-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
-            color: white;
-            transform: translateY(-2px);
-        }
-
-        .logout-btn {
-            background: rgba(245, 87, 108, 0.3);
-            border-color: rgba(245, 87, 108, 0.5);
-        }
-
-        .logout-btn:hover {
-            background: rgba(245, 87, 108, 0.5);
-        }
-
-        /* User Card */
-        .user-card {
-            background: rgba(255, 255, 255, 0.12);
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 15px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: all 0.3s ease;
-        }
-
-        .user-card:hover {
-            background: rgba(255, 255, 255, 0.18);
-            transform: translateX(5px);
-        }
-
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            color: white;
-        }
-
-        .user-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            background: var(--primary-gradient);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-            color: white;
-            font-weight: bold;
-        }
-
-        .user-actions {
-            display: flex;
-            gap: 10px;
-        }
-
-        /* Buttons */
-        .btn-glass {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            color: white;
-            padding: 10px 25px;
-            border-radius: 10px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        .btn-glass:hover {
-            background: rgba(255, 255, 255, 0.25);
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-        }
-
-        .btn-primary-glass {
-            background: linear-gradient(135deg, rgba(74, 172, 254, 0.4), rgba(0, 242, 254, 0.4));
-            border-color: rgba(74, 172, 254, 0.6);
-        }
-
-        .btn-danger-glass {
-            background: linear-gradient(135deg, rgba(240, 147, 251, 0.4), rgba(245, 87, 108, 0.4));
-            border-color: rgba(245, 87, 108, 0.6);
-        }
-
-        .btn-success-glass {
-            background: linear-gradient(135deg, rgba(76, 175, 80, 0.4), rgba(56, 142, 60, 0.4));
-            border-color: rgba(76, 175, 80, 0.6);
-        }
-
-        .btn-icon {
-            padding: 8px 15px;
-            font-size: 0.9rem;
-        }
-
-        /* Modal */
-        .modal-glass .modal-content {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            border-radius: 20px;
-            border: none;
-            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-        }
-
-        .modal-glass .modal-header {
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-            background: var(--primary-gradient);
-            color: white;
-            border-radius: 20px 20px 0 0;
-        }
-
-        .modal-glass .modal-footer {
-            border-top: 1px solid rgba(0, 0, 0, 0.1);
-        }
-
-        /* Form */
-        .form-control-glass {
-            background: rgba(255, 255, 255, 0.8);
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            border-radius: 10px;
-            padding: 12px;
-            transition: all 0.3s ease;
-        }
-
-        .form-control-glass:focus {
-            background: white;
-            border-color: #667eea;
-            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
-            outline: none;
-        }
-
-        .form-label-glass {
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 8px;
-        }
-
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: white;
-        }
-
-        .empty-state i {
-            font-size: 4rem;
-            margin-bottom: 20px;
-            opacity: 0.5;
-        }
-
-        .empty-state h3 {
-            font-size: 1.5rem;
-            margin-bottom: 10px;
-        }
-
-        /* Alert */
-        .alert-glass {
-            background: rgba(255, 255, 255, 0.15);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            color: white;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-
-        /* Loading */
-        .spinner-glass {
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-top: 3px solid white;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .page-header h1 {
-                font-size: 1.8rem;
-            }
-
-            .user-card {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 15px;
-            }
-
-            .user-actions {
-                width: 100%;
-                justify-content: flex-end;
-            }
-        }
-    </style>
-</head>
-<body>
-    <!-- Navigation -->
-    <div class="nav-bar">
-        <div class="nav-links">
-            <a href="/dashboard" class="nav-btn"><i class="fas fa-home"></i> Dashboard</a>
-            <a href="/tokens" class="nav-btn"><i class="fas fa-key"></i> Tokens</a>
-            <a href="/envios" class="nav-btn"><i class="fas fa-box"></i> Envios</a>
-            <a href="/mensagem" class="nav-btn"><i class="fas fa-message"></i> Mensagens</a>
-            <a href="/usuarios" class="nav-btn active"><i class="fas fa-users"></i> Usuários</a>
-        </div>
-        <form action="/logout" method="POST" class="d-inline">
-            <button type="submit" class="nav-btn logout-btn"><i class="fas fa-sign-out-alt"></i> Sair</button>
-        </form>
+<!-- Main Content -->
+<div class="glass-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="fas fa-list"></i> Usuários do Sistema</h2>
+        <button class="btn-glass btn-success-glass" onclick="showCreateModal()">
+            <i class="fas fa-user-plus"></i> Novo Usuário
+        </button>
     </div>
 
-    <!-- Header -->
-    <div class="page-header">
-        <h1><i class="fas fa-users-cog"></i> Gerenciamento de Usuários</h1>
-        <p>Gerencie os administradores do sistema</p>
-    </div>
-
-    <!-- Alert Area -->
-    <div id="alertArea"></div>
-
-    <!-- Main Content -->
-    <div class="glass-container">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2 class="text-white"><i class="fas fa-list"></i> Usuários do Sistema</h2>
-            <button class="btn-glass btn-success-glass" onclick="showCreateModal()">
-                <i class="fas fa-user-plus"></i> Novo Usuário
-            </button>
-        </div>
-
-        <div id="usersContainer">
-            <div class="spinner-glass"></div>
-        </div>
-    </div>
-
-    <!-- Create User Modal -->
-    <div class="modal fade modal-glass" id="createUserModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-user-plus"></i> Criar Novo Usuário</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="createUserForm">
-                        <div class="mb-3">
-                            <label class="form-label-glass">Nome de Usuário</label>
-                            <input type="text" class="form-control form-control-glass" name="username" required>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label-glass">Senha</label>
-                            <input type="password" class="form-control form-control-glass" name="password" required>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-primary" onclick="createUser()">Criar Usuário</button>
-                </div>
+    <div id="usersContainer">
+        <div class="text-center">
+            <div class="spinner-border text-light" role="status">
+                <span class="visually-hidden">Carregando...</span>
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Change Password Modal -->
-    <div class="modal fade modal-glass" id="changePasswordModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title"><i class="fas fa-key"></i> Alterar Senha</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <form id="changePasswordForm">
-                        <input type="hidden" id="changePasswordUsername" name="username">
-                        <div class="mb-3">
-                            <label class="form-label-glass">Nova Senha</label>
-                            <input type="password" class="form-control form-control-glass" name="new_password" required>
-                        </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="button" class="btn btn-primary" onclick="changePassword()">Alterar Senha</button>
-                </div>
+<!-- Create User Modal -->
+<div class="modal fade" id="createUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); border-radius: 20px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 20px 20px 0 0;">
+                <h5 class="modal-title"><i class="fas fa-user-plus"></i> Criar Novo Usuário</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-    <script>
-        let createModal;
-        let passwordModal;
-
-        document.addEventListener('DOMContentLoaded', function() {
-            createModal = new bootstrap.Modal(document.getElementById('createUserModal'));
-            passwordModal = new bootstrap.Modal(document.getElementById('changePasswordModal'));
-            loadUsers();
-        });
-
-        function showAlert(message, type = 'success') {
-            const alertArea = document.getElementById('alertArea');
-            const alert = document.createElement('div');
-            alert.className = `alert-glass alert-${type}`;
-            alert.innerHTML = `
-                <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${message}
-                <button type="button" class="btn-close btn-close-white float-end" onclick="this.parentElement.remove()"></button>
-            `;
-            alertArea.appendChild(alert);
-            setTimeout(() => alert.remove(), 5000);
-        }
-
-        async function loadUsers() {
-            try {
-                const response = await axios.get('/api/users');
-                const users = response.data.users;
-                const container = document.getElementById('usersContainer');
-
-                if (users.length === 0) {
-                    container.innerHTML = `
-                        <div class="empty-state">
-                            <i class="fas fa-users-slash"></i>
-                            <h3>Nenhum usuário encontrado</h3>
-                            <p>Clique em "Novo Usuário" para criar o primeiro usuário</p>
-                        </div>
-                    `;
-                    return;
-                }
-
-                container.innerHTML = users.map(user => `
-                    <div class="user-card">
-                        <div class="user-info">
-                            <div class="user-avatar">
-                                ${user.username.charAt(0).toUpperCase()}
-                            </div>
-                            <div>
-                                <h5 class="mb-0">${user.username}</h5>
-                                ${user.username === 'admin' ? '<small class="text-white-50"><i class="fas fa-crown"></i> Administrador</small>' : ''}
-                            </div>
-                        </div>
-                        <div class="user-actions">
-                            <button class="btn-glass btn-primary-glass btn-icon" onclick="showChangePasswordModal('${user.username}')">
-                                <i class="fas fa-key"></i> Senha
-                            </button>
-                            ${user.username !== 'admin' ? `
-                                <button class="btn-glass btn-danger-glass btn-icon" onclick="deleteUser('${user.username}')">
-                                    <i class="fas fa-trash"></i> Excluir
-                                </button>
-                            ` : ''}
-                        </div>
+            <div class="modal-body">
+                <form id="createUserForm">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Nome de Usuário</label>
+                        <input type="text" class="form-control" name="username" required>
                     </div>
-                `).join('');
-            } catch (error) {
-                console.error('Erro ao carregar usuários:', error);
-                showAlert('Erro ao carregar usuários', 'danger');
-            }
-        }
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Senha</label>
+                        <input type="password" class="form-control" name="password" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="createUser()">Criar Usuário</button>
+            </div>
+        </div>
+    </div>
+</div>
 
-        function showCreateModal() {
-            document.getElementById('createUserForm').reset();
-            createModal.show();
-        }
+<!-- Change Password Modal -->
+<div class="modal fade" id="changePasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content" style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); border-radius: 20px;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 20px 20px 0 0;">
+                <h5 class="modal-title"><i class="fas fa-key"></i> Alterar Senha</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="changePasswordForm">
+                    <input type="hidden" id="changePasswordUsername" name="username">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Nova Senha</label>
+                        <input type="password" class="form-control" name="new_password" required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="changePassword()">Alterar Senha</button>
+            </div>
+        </div>
+    </div>
+</div>
 
-        function showChangePasswordModal(username) {
-            document.getElementById('changePasswordUsername').value = username;
-            document.getElementById('changePasswordForm').reset();
-            passwordModal.show();
-        }
+<style>
+    .user-card {
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 15px;
+        padding: 20px;
+        margin-bottom: 15px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        transition: all 0.3s ease;
+    }
 
-        async function createUser() {
-            const form = document.getElementById('createUserForm');
-            const formData = new FormData(form);
+    .user-card:hover {
+        background: rgba(255, 255, 255, 0.18);
+        transform: translateX(5px);
+    }
 
-            try {
-                const response = await axios.post('/api/users/create', formData);
-                showAlert(response.data.message, 'success');
-                createModal.hide();
-                loadUsers();
-            } catch (error) {
-                showAlert(error.response?.data?.detail || 'Erro ao criar usuário', 'danger');
-            }
-        }
+    .user-info-card {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        color: white;
+    }
 
-        async function changePassword() {
-            const username = document.getElementById('changePasswordUsername').value;
-            const form = document.getElementById('changePasswordForm');
-            const formData = new FormData(form);
+    .user-avatar-card {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        color: white;
+        font-weight: bold;
+    }
 
-            try {
-                const response = await axios.post(`/api/users/${username}/change-password`, formData);
-                showAlert(response.data.message, 'success');
-                passwordModal.hide();
-            } catch (error) {
-                showAlert(error.response?.data?.detail || 'Erro ao alterar senha', 'danger');
-            }
-        }
+    .user-actions {
+        display: flex;
+        gap: 10px;
+    }
 
-        async function deleteUser(username) {
-            if (!confirm(`Tem certeza que deseja excluir o usuário ${username}?`)) {
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: white;
+    }
+
+    .empty-state i {
+        font-size: 4rem;
+        margin-bottom: 20px;
+        opacity: 0.5;
+    }
+
+    .alert-glass-success {
+        background: rgba(76, 175, 80, 0.2);
+        border: 1px solid rgba(76, 175, 80, 0.4);
+        color: white;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+
+    .alert-glass-danger {
+        background: rgba(245, 87, 108, 0.2);
+        border: 1px solid rgba(245, 87, 108, 0.4);
+        color: white;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+</style>
+
+<script>
+    let createModal;
+    let passwordModal;
+
+    document.addEventListener('DOMContentLoaded', function() {
+        createModal = new bootstrap.Modal(document.getElementById('createUserModal'));
+        passwordModal = new bootstrap.Modal(document.getElementById('changePasswordModal'));
+        loadUsers();
+    });
+
+    function showAlert(message, type = 'success') {
+        const alertArea = document.getElementById('alertArea');
+        const alert = document.createElement('div');
+        alert.className = `alert-glass-${type}`;
+        alert.innerHTML = `
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${message}
+            <button type="button" class="btn-close btn-close-white float-end" onclick="this.parentElement.remove()"></button>
+        `;
+        alertArea.appendChild(alert);
+        setTimeout(() => alert.remove(), 5000);
+    }
+
+    async function loadUsers() {
+        try {
+            const response = await axios.get('/api/users');
+            const users = response.data.users;
+            const container = document.getElementById('usersContainer');
+
+            if (users.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-users-slash"></i>
+                        <h3>Nenhum usuário encontrado</h3>
+                        <p>Clique em "Novo Usuário" para criar o primeiro usuário</p>
+                    </div>
+                `;
                 return;
             }
 
-            try {
-                const response = await axios.delete(`/api/users/${username}`);
-                showAlert(response.data.message, 'success');
-                loadUsers();
-            } catch (error) {
-                showAlert(error.response?.data?.detail || 'Erro ao excluir usuário', 'danger');
-            }
+            container.innerHTML = users.map(user => `
+                <div class="user-card">
+                    <div class="user-info-card">
+                        <div class="user-avatar-card">
+                            ${user.username.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                            <h5 class="mb-0">${user.username}</h5>
+                            ${user.username === 'admin' ? '<small class="text-white-50"><i class="fas fa-crown"></i> Administrador</small>' : ''}
+                        </div>
+                    </div>
+                    <div class="user-actions">
+                        <button class="btn-glass btn-primary-glass" onclick="showChangePasswordModal('${user.username}')">
+                            <i class="fas fa-key"></i> Senha
+                        </button>
+                        ${user.username !== 'admin' ? `
+                            <button class="btn-glass btn-danger-glass" onclick="deleteUser('${user.username}')">
+                                <i class="fas fa-trash"></i> Excluir
+                            </button>
+                        ` : ''}
+                    </div>
+                </div>
+            `).join('');
+        } catch (error) {
+            console.error('Erro ao carregar usuários:', error);
+            showAlert('Erro ao carregar usuários: ' + (error.response?.data?.detail || error.message), 'danger');
         }
-    </script>
-</body>
-</html>
+    }
+
+    function showCreateModal() {
+        document.getElementById('createUserForm').reset();
+        createModal.show();
+    }
+
+    function showChangePasswordModal(username) {
+        document.getElementById('changePasswordUsername').value = username;
+        document.getElementById('changePasswordForm').reset();
+        passwordModal.show();
+    }
+
+    async function createUser() {
+        const form = document.getElementById('createUserForm');
+        const formData = new FormData(form);
+
+        try {
+            const response = await axios.post('/api/users/create', formData);
+            showAlert(response.data.message, 'success');
+            createModal.hide();
+            loadUsers();
+        } catch (error) {
+            showAlert(error.response?.data?.detail || 'Erro ao criar usuário', 'danger');
+        }
+    }
+
+    async function changePassword() {
+        const username = document.getElementById('changePasswordUsername').value;
+        const form = document.getElementById('changePasswordForm');
+        const formData = new FormData(form);
+
+        try {
+            const response = await axios.post(`/api/users/${username}/change-password`, formData);
+            showAlert(response.data.message, 'success');
+            passwordModal.hide();
+        } catch (error) {
+            showAlert(error.response?.data?.detail || 'Erro ao alterar senha', 'danger');
+        }
+    }
+
+    async function deleteUser(username) {
+        if (!confirm(`Tem certeza que deseja excluir o usuário ${username}?`)) {
+            return;
+        }
+
+        try {
+            const response = await axios.delete(`/api/users/${username}`);
+            showAlert(response.data.message, 'success');
+            loadUsers();
+        } catch (error) {
+            showAlert(error.response?.data?.detail || 'Erro ao excluir usuário', 'danger');
+        }
+    }
+</script>
+{% endblock %}

@@ -587,21 +587,21 @@ async def list_users(request: Request):
     """
     Lista todos os usuários do sistema
     """
-    import rocksdbpy
-
     try:
         db = request.app.state.db
         users = []
 
         # Iterar sobre todas as chaves buscando usuários
         it = db.iterator()
-        it.seek_to_first()
 
         for key, _ in it:
-            key_str = key.decode('utf-8')
-            if key_str.startswith('user:') and ':password' not in key_str:
-                username = key_str.replace('user:', '')
-                users.append({"username": username})
+            try:
+                key_str = key.decode('utf-8')
+                if key_str.startswith('user:'):
+                    username = key_str.replace('user:', '')
+                    users.append({"username": username})
+            except:
+                continue
 
         return {"users": users}
     except Exception as e:
