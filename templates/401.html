@@ -1,28 +1,15 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/css/style.css?v=3">
-    <title>Não autorizado (401)</title>
-</head>
-<body class="bg-light">
-    <div class="container">
-        <div class="row justify-content-center align-items-center min-vh-100">
-            <div class="col-md-6 col-lg-4">
-                <div class="text-center">
-                    <div class="alert alert-danger" role="alert">
-                        <h1 class="display-1 text-danger">401</h1>
-                        <h4 class="alert-heading">Não autorizado</h4>
-                        <p>Você não tem permissão para acessar esta página. Faça login para continuar.</p>
-                        <hr>
-                        <a href="/" class="btn btn-primary">Ir para Login</a>
-                    </div>
-                </div>
-            </div>
-        </div>
+{% extends "base_modern.html" %}
+
+{% block title %}Não autorizado (401){% endblock %}
+
+{% block content %}
+<div class="glass-card text-center">
+    <div class="alert alert-danger" role="alert">
+        <h1 class="display-1 text-danger">401</h1>
+        <h4 class="alert-heading">Não autorizado</h4>
+        <p>Você não tem permissão para acessar esta página. Faça login para continuar.</p>
+        <hr>
+        <a href="/" class="btn btn-primary">Ir para Login</a>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+</div>
+{% endblock %}

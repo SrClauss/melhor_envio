@@ -1,48 +1,50 @@
-{% extends "base.html" %}
+{% extends "base_modern.html" %}
 
 {% block title %}Envios Ativos - Melhor Envio{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <div>
-                    <h2 class="card-title mb-0">Envios Ativos</h2>
-                    <p class="text-muted mb-0">Visualize e gerencie seus envios ativos</p>
-                </div>
-                <button id="refreshBtn" class="btn btn-primary" onclick="inicializar()">
-                    <i class="bi bi-arrow-clockwise"></i> Atualizar
-                </button>
-            </div>
-            <div class="card-body">
-                <div id="loadingIndicator" class="text-center py-4" style="display: none;">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Carregando...</span>
+<div class="glass-card">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div>
+                        <h2 class="card-title mb-0">Envios Ativos</h2>
+                        <p class="text-muted mb-0">Visualize e gerencie seus envios ativos</p>
                     </div>
-                    <p class="mt-2">Carregando envios...</p>
-                </div>
-                
-                <div id="errorAlert" class="alert alert-danger" style="display: none;" role="alert">
-                    <h5 class="alert-heading">Erro ao carregar envios</h5>
-                    <p id="errorMessage"></p>
-                </div>
-                
-                <div id="enviosContainer">
-                    <div class="alert alert-info">
-                        <i class="bi bi-info-circle"></i> Clique em "Atualizar" para carregar os envios
-                    </div>
-                </div>
-                
-                <!-- Debug data (hidden by default) -->
-                <div class="mt-4">
-                    <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#debugData">
-                        <i class="bi bi-code"></i> Mostrar dados brutos (debug)
+                    <button id="refreshBtn" class="btn btn-primary" onclick="inicializar()">
+                        <i class="bi bi-arrow-clockwise"></i> Atualizar
                     </button>
-                    <div class="collapse mt-2" id="debugData">
-                        <div class="card">
-                            <div class="card-body">
-                                <pre id="enviosData" class="mb-0" style="font-size: 0.8em; max-height: 300px; overflow-y: auto;"></pre>
+                </div>
+                <div class="card-body">
+                    <div id="loadingIndicator" class="text-center py-4" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Carregando...</span>
+                        </div>
+                        <p class="mt-2">Carregando envios...</p>
+                    </div>
+                    
+                    <div id="errorAlert" class="alert alert-danger" style="display: none;" role="alert">
+                        <h5 class="alert-heading">Erro ao carregar envios</h5>
+                        <p id="errorMessage"></p>
+                    </div>
+                    
+                    <div id="enviosContainer">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i> Clique em "Atualizar" para carregar os envios
+                        </div>
+                    </div>
+                    
+                    <!-- Debug data (hidden by default) -->
+                    <div class="mt-4">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#debugData">
+                            <i class="bi bi-code"></i> Mostrar dados brutos (debug)
+                        </button>
+                        <div class="collapse mt-2" id="debugData">
+                            <div class="card">
+                                <div class="card-body">
+                                    <pre id="enviosData" class="mb-0" style="font-size: 0.8em; max-height: 300px; overflow-y: auto;"></pre>
+                                </div>
                             </div>
                         </div>
                     </div>

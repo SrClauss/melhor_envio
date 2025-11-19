@@ -1,82 +1,78 @@
-{% extends "base.html" %}
+{% extends "base_modern.html" %}
 
 {% block title %}Dashboard - Melhor Envio{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h2 class="card-title mb-0">Dashboard</h2>
+<div class="glass-card">
+    <div class="card-header">
+        <h2 class="card-title mb-0">Dashboard</h2>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-success" role="alert">
+            <h4 class="alert-heading">Bem-vindo!</h4>
+            <p>Você está logado no sistema de gestão do Melhor Envio.</p>
+            <hr>
+            <p class="mb-0">Use o menu de navegação para acessar as diferentes funcionalidades.</p>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card bg-primary text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Gestão de Token</h5>
+                        <p class="card-text">Configure e gerencie seu token de acesso do Melhor Envio.</p>
+                        <a href="/tokens" class="btn btn-light">Acessar</a>
+                    </div>
+                </div>
             </div>
-            <div class="card-body">
-                <div class="alert alert-success" role="alert">
-                    <h4 class="alert-heading">Bem-vindo!</h4>
-                    <p>Você está logado no sistema de gestão do Melhor Envio.</p>
-                    <hr>
-                    <p class="mb-0">Use o menu de navegação para acessar as diferentes funcionalidades.</p>
-                </div>
-                
-                <div class="row mt-4">
-                    <div class="col-md-6">
-                        <div class="card bg-primary text-white">
-                            <div class="card-body">
-                                <h5 class="card-title">Gestão de Token</h5>
-                                <p class="card-text">Configure e gerencie seu token de acesso do Melhor Envio.</p>
-                                <a href="/tokens" class="btn btn-light">Acessar</a>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card bg-success text-white">
-                            <div class="card-body">
-                                <h5 class="card-title">Envios Ativos</h5>
-                                <p class="card-text">Visualize e gerencie seus envios ativos.</p>
-                                <a href="/envios" class="btn btn-light">Acessar</a>
-                            </div>
-                        </div>
+            <div class="col-md-6">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <h5 class="card-title">Envios Ativos</h5>
+                        <p class="card-text">Visualize e gerencie seus envios ativos.</p>
+                        <a href="/envios" class="btn btn-light">Acessar</a>
                     </div>
                 </div>
+            </div>
+        </div>
 
-                <div class="row mt-4">
-                    <div class="col-12">
-                        <div class="card">
-                            <div class="card-header">
-                                <h5 class="card-title mb-0">Configurações de Monitoramento</h5>
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Configurações de Monitoramento</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="intervalForm" method="post" action="/api/config/interval_minutes">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <label for="interval_minutes" class="form-label">Intervalo de Monitoramento (minutos)</label>
+                                    <input type="number" class="form-control" id="interval_minutes" name="interval_minutes"
+                                           min="2" max="60" required>
+                                    <div class="form-text">Intervalo entre verificações automáticas (2-60 minutos)</div>
+                                </div>
+                                <div class="col-md-6 d-flex align-items-end">
+                                    <button type="submit" class="btn btn-primary">Salvar Configuração</button>
+                                </div>
                             </div>
-                            <div class="card-body">
-                                <form id="intervalForm" method="post" action="/api/config/interval_minutes">
-                                    <div class="row">
-                                        <div class="col-md-6">
-                                            <label for="interval_minutes" class="form-label">Intervalo de Monitoramento (minutos)</label>
-                                            <input type="number" class="form-control" id="interval_minutes" name="interval_minutes"
-                                                   min="2" max="60" required>
-                                            <div class="form-text">Intervalo entre verificações automáticas (2-60 minutos)</div>
-                                        </div>
-                                        <div class="col-md-6 d-flex align-items-end">
-                                            <button type="submit" class="btn btn-primary">Salvar Configuração</button>
-                                        </div>
-                                    </div>
-                                </form>
-                                <hr>
-                                <form id="hoursForm" method="post" action="/api/config/monitor_hours">
-                                    <div class="row">
-                                        <div class="col-md-3">
-                                            <label for="start_hour" class="form-label">Início do Monitoramento (hora)</label>
-                                            <input type="time" class="form-control" id="start_hour" name="start_hour" required>
-                                        </div>
-                                        <div class="col-md-3">
-                                            <label for="end_hour" class="form-label">Fim do Monitoramento (hora)</label>
-                                            <input type="time" class="form-control" id="end_hour" name="end_hour" required>
-                                        </div>
-                                        <div class="col-md-6 d-flex align-items-end">
-                                            <button type="submit" class="btn btn-secondary">Salvar Horário</button>
-                                            <div class="ms-3 text-muted align-self-center">Padrão: 06:00 - 18:00</div>
-                                        </div>
-                                    </div>
-                                </form>
+                        </form>
+                        <hr>
+                        <form id="hoursForm" method="post" action="/api/config/monitor_hours">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <label for="start_hour" class="form-label">Início do Monitoramento (hora)</label>
+                                    <input type="time" class="form-control" id="start_hour" name="start_hour" required>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="end_hour" class="form-label">Fim do Monitoramento (hora)</label>
+                                    <input type="time" class="form-control" id="end_hour" name="end_hour" required>
+                                </div>
+                                <div class="col-md-6 d-flex align-items-end">
+                                    <button type="submit" class="btn btn-secondary">Salvar Horário</button>
+                                    <div class="ms-3 text-muted align-self-center">Padrão: 06:00 - 18:00</div>
+                                </div>
                             </div>
-                        </div>
+                        </form>
                     </div>
                 </div>
             </div>

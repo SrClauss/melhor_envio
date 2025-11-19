@@ -1,65 +1,67 @@
-{% extends "base.html" %}
+{% extends "base_modern.html" %}
 
 {% block title %}Gestão de Tokens - Melhor Envio{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header">
-                <h2 class="card-title mb-0">Gestão de Tokens</h2>
-                <p class="text-muted mb-0">Configure e gerencie seu token de acesso do Melhor Envio</p>
-            </div>
-            <div class="card-body">
-                <!-- Token atual -->
-                <div class="mb-4" id="currentToken"
-                     data-token="{{ token_melhor_envio | default('') }}"
-                     data-exp="{{ token_expiration | default('') }}">
-                    <h5>Token Atual</h5>
-                    <div class="mb-3">
-                        <label for="tokenValue" class="form-label">Token de Acesso</label>
-                        <textarea id="tokenValue" rows="4" readonly class="form-control">{{ token_melhor_envio | default('Nenhum token encontrado') }}</textarea>
-                    </div>
-                    
-                    <div class="d-flex gap-2 mb-3">
-                        <button id="copyTokenBtn" type="button" class="btn btn-outline-primary btn-sm">
-                            <i class="bi bi-clipboard"></i> Copiar Token
-                        </button>
-                        <button id="revealBtn" type="button" class="btn btn-outline-secondary btn-sm">
-                            <i class="bi bi-eye"></i> Selecionar
-                        </button>
-                    </div>
-                    
-                    <div class="alert alert-info">
-                        <strong>Expiração:</strong><br>
-                        <span id="tokenExp">{{ token_expiration | default('Sem informação de expiração') }}</span>
-                    </div>
+<div class="glass-card">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title mb-0">Gestão de Tokens</h2>
+                    <p class="text-muted mb-0">Configure e gerencie seu token de acesso do Melhor Envio</p>
                 </div>
-
-                <hr>
-
-                <!-- Form para atualizar token -->
-                <div>
-                    <h5>Atualizar Token</h5>
-                    <form id="updateTokenForm">
+                <div class="card-body">
+                    <!-- Token atual -->
+                    <div class="mb-4" id="currentToken"
+                         data-token="{{ token_melhor_envio | default('') }}"
+                         data-exp="{{ token_expiration | default('') }}">
+                        <h5>Token Atual</h5>
                         <div class="mb-3">
-                            <label for="newToken" class="form-label">Novo Token</label>
-                            <textarea id="newToken" name="token" rows="4" placeholder="Cole o token completo aqui" class="form-control"></textarea>
-                            <div class="form-text">Cole aqui o token JWT fornecido pelo Melhor Envio</div>
+                            <label for="tokenValue" class="form-label">Token de Acesso</label>
+                            <textarea id="tokenValue" rows="4" readonly class="form-control">{{ token_melhor_envio | default('Nenhum token encontrado') }}</textarea>
                         </div>
                         
-                        <div class="d-flex gap-2 align-items-center">
-                            <button id="pasteBtn" type="button" class="btn btn-outline-secondary">
-                                <i class="bi bi-clipboard-plus"></i> Colar
+                        <div class="d-flex gap-2 mb-3">
+                            <button id="copyTokenBtn" type="button" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-clipboard"></i> Copiar Token
                             </button>
-                            <button id="submitTokenBtn" type="submit" class="btn btn-primary">
-                                <i class="bi bi-save"></i> Salvar Token
+                            <button id="revealBtn" type="button" class="btn btn-outline-secondary btn-sm">
+                                <i class="bi bi-eye"></i> Selecionar
                             </button>
-                            <span id="updateStatus" class="text-success ms-2" style="display:none;">
-                                <i class="bi bi-check-circle"></i> Token atualizado com sucesso!
-                            </span>
                         </div>
-                    </form>
+                        
+                        <div class="alert alert-info">
+                            <strong>Expiração:</strong><br>
+                            <span id="tokenExp">{{ token_expiration | default('Sem informação de expiração') }}</span>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- Form para atualizar token -->
+                    <div>
+                        <h5>Atualizar Token</h5>
+                        <form id="updateTokenForm">
+                            <div class="mb-3">
+                                <label for="newToken" class="form-label">Novo Token</label>
+                                <textarea id="newToken" name="token" rows="4" placeholder="Cole o token completo aqui" class="form-control"></textarea>
+                                <div class="form-text">Cole aqui o token JWT fornecido pelo Melhor Envio</div>
+                            </div>
+                            
+                            <div class="d-flex gap-2 align-items-center">
+                                <button id="pasteBtn" type="button" class="btn btn-outline-secondary">
+                                    <i class="bi bi-clipboard-plus"></i> Colar
+                                </button>
+                                <button id="submitTokenBtn" type="submit" class="btn btn-primary">
+                                    <i class="bi bi-save"></i> Salvar Token
+                                </button>
+                                <span id="updateStatus" class="text-success ms-2" style="display:none;">
+                                    <i class="bi bi-check-circle"></i> Token atualizado com sucesso!
+                                </span>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
