@@ -6,6 +6,7 @@ import requests
 from fastapi.responses import JSONResponse
 import asyncio
 from datetime import datetime
+from app.tracking import rastrear, MelhorRastreioException
 
 def get_current_user(request: Request):
     """
@@ -454,3 +455,99 @@ async def forcar_extracao_rastreio_manual(request: Request):
         raise HTTPException(status_code=500, detail=f"Erro ao agendar extração: {str(e)}")
 
 
+@router.get("/tracking/{codigo}")
+async def get_tracking(codigo: str):
+    """
+    Endpoint para consultar rastreamento de um código específico.
+
+    Uso via curl:
+    curl -X GET "http://localhost/api/tracking/LTM-95710601920"
+
+    Args:
+        codigo (str): Código de rastreamento
+
+    Returns:
+        JSON com dados de rastreamento
+    """
+    try:
+        # Usar a função de conveniência do módulo tracking
+        resultado = rastrear(codigo)
+
+        # Retornar como JSON
+        return JSONResponse(status_code=200, content=resultado)
+
+    except MelhorRastreioException as e:
+        # Erro específico do módulo de rastreamento
+        raise HTTPException(status_code=400, detail=f"Erro no rastreamento: {str(e)}")
+    except Exception as e:
+        # Erro genérico
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+
+@router.post("/shipments/{shipment_id}/enviar-whatsapp")
+async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
+    """
+    Força o envio de mensagem WhatsApp para um shipment específico.
+
+    Args:
+        shipment_id: ID do shipment no Melhor Envio
+
+    Returns:
+        JSON com status do envio
+    """
+    from app import webhooks
+
+    try:
+        db = request.app.state.db
+
+        # Buscar dados do shipment no banco
+        key = f"etiqueta:{shipment_id}".encode('utf-8')
+        existing_data = db.get(key)
+
+        if not existing_data:
+            raise HTTPException(status_code=404, detail="Shipment não encontrado no banco de dados")
+
+        # Carregar dados
+        try:
+            shipment_data = json.loads(existing_data.decode('utf-8'))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao ler dados do shipment: {e}")
+
+        # Verificar se tem dados necessários
+        telefone = shipment_data.get('telefone')
+        nome = shipment_data.get('nome', '')
+        rastreio_detalhado = shipment_data.get('rastreio_detalhado')
+
+        if not telefone:
+            raise HTTPException(status_code=400, detail="Shipment não possui telefone cadastrado")
+
+        if not rastreio_detalhado or rastreio_detalhado == 'Ainda não processado':
+            raise HTTPException(status_code=400, detail="Shipment ainda não possui rastreamento processado")
+
+        # Formatar mensagem
+        try:
+            mensagem = webhooks.formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment_data, nome)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao formatar mensagem: {e}")
+
+        # Enviar WhatsApp
+        try:
+            resultado = webhooks.enviar_para_whatsapp(mensagem, telefone)
+
+            # Marcar como enviado
+            shipment_data['first_message_sent'] = True
+            db.set(key, json.dumps(shipment_data, ensure_ascii=False).encode('utf-8'))
+
+            return {
+                "success": True,
+                "message": "Mensagem WhatsApp enviada com sucesso",
+                "telefone": telefone,
+                "resultado": resultado
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Erro ao enviar WhatsApp: {e}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao processar envio: {e}")

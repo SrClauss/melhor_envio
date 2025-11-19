@@ -89,10 +89,11 @@ function displayEnvios(envios) {
             <table class="table table-striped table-hover">
                 <thead class="table-dark">
                     <tr>
-                        <th>ID</th>
+                        <th>Transportadora</th>
+                        <th>Código Rastreio</th>
                         <th>Destinatário</th>
                         <th>Telefone</th>
-                        <th>Status Completo</th>
+                        <th>Status</th>
                         <th>Ações</th>
                     </tr>
                 </thead>
@@ -100,21 +101,62 @@ function displayEnvios(envios) {
     `;
 
     envios.shipments.forEach(envio => {
+        // Extrair informações da transportadora do rastreio_detalhado
+        let transportadora = 'N/A';
+        let servicoTipo = '';
+
+        try {
+            const rastreioData = envio.rastreio_detalhado;
+            if (rastreioData && typeof rastreioData === 'object' && rastreioData.ultimo_evento) {
+                const evento = rastreioData.ultimo_evento;
+                transportadora = evento.transportadora || 'N/A';
+                servicoTipo = evento.servico_tipo || '';
+            } else if (rastreioData && typeof rastreioData === 'object' && rastreioData.eventos && rastreioData.eventos.length > 0) {
+                const evento = rastreioData.eventos[0];
+                transportadora = evento.transportadora || 'N/A';
+                servicoTipo = evento.servico_tipo || '';
+            }
+        } catch(e) {
+            console.error('Erro ao extrair transportadora:', e);
+        }
+
+        // Fallback: tentar extrair do código de rastreio
+        if (transportadora === 'N/A' && envio.tracking) {
+            const codigo = envio.tracking.toUpperCase();
+            if (codigo.startsWith('LTM')) {
+                transportadora = 'Loggi';
+            } else if (codigo.match(/^[A-Z]{2}\d{9}BR$/)) {
+                transportadora = 'Correios';
+            } else if (codigo.includes('JD')) {
+                transportadora = 'Jadlog';
+            }
+        }
+
+        const codigoRastreio = envio.tracking || 'N/A';
+        const displayTransportadora = servicoTipo ? `${transportadora} (${servicoTipo})` : transportadora;
+
         html += `
             <tr>
-                <td><code>${envio.id || 'N/A'}</code></td>
+                <td><strong>${displayTransportadora}</strong></td>
+                <td>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="copyTrackingById('${envio.id}')" title="Copiar código">
+                        <i class="bi bi-clipboard"></i> ${codigoRastreio}
+                    </button>
+                </td>
                 <td>${envio.nome || 'N/A'}</td>
                 <td><small>${envio.telefone || 'N/A'}</small></td>
                 <td>
-                    <button class="btn btn-sm btn-outline-info" onclick="openRastreioModal('${envio.id}')">Ver status</button>
+                    <button class="btn btn-sm btn-outline-info" onclick="openRastreioModal('${envio.id}')">
+                        <i class="bi bi-info-circle"></i> Ver detalhes
+                    </button>
                 </td>
                 <td>
-                    <div class="btn-group btn-group-sm align-items-center">
-                        <button class="btn btn-outline-primary btn-sm" onclick="openRastreioModal('${envio.id}')">
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-outline-primary" onclick="openRastreioModal('${envio.id}')" title="Ver rastreamento">
                             <i class="bi bi-eye"></i>
                         </button>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="copyTrackingById('${envio.id}')">
-                            ${envio.tracking || envio.rastreio_completo || ''}
+                        <button class="btn btn-outline-success" onclick="enviarWhatsApp('${envio.id}')" title="Enviar WhatsApp">
+                            <i class="bi bi-whatsapp"></i>
                         </button>
                     </div>
                 </td>
@@ -255,6 +297,27 @@ async function inicializar() {
         }, null, 2);
     } finally {
         hideLoading();
+    }
+}
+
+// Função para enviar WhatsApp forçado
+async function enviarWhatsApp(envioId) {
+    if (!confirm('Deseja enviar mensagem WhatsApp para este envio?')) {
+        return;
+    }
+
+    try {
+        const response = await axios.post(`/api/shipments/${envioId}/enviar-whatsapp`);
+
+        if (response.data.success) {
+            alert(`✅ Mensagem enviada com sucesso para ${response.data.telefone}`);
+        } else {
+            alert('⚠️ Erro ao enviar mensagem: ' + (response.data.message || 'Erro desconhecido'));
+        }
+    } catch(error) {
+        console.error('Erro ao enviar WhatsApp:', error);
+        const errorMsg = error?.response?.data?.detail || error?.message || 'Erro desconhecido';
+        alert('❌ Erro ao enviar WhatsApp: ' + errorMsg);
     }
 }
 

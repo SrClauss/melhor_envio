@@ -241,15 +241,38 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
         # Extrair informações do evento
         data_raw = evento.get('data_registro') or evento.get('data_criacao') or ''
         data_formatada = _format_data_br(data_raw)
-        titulo = evento.get('titulo') or evento.get('descricao') or 'Movimentação registrada'
-        localizacao = evento.get('localizacao') or ''
+
+        # NOVO: Priorizar título e descrição traduzidos completos
+        titulo = (
+            evento.get('titulo_completo') or
+            evento.get('titulo') or
+            evento.get('descricao') or
+            'Movimentação registrada'
+        )
+        descricao_completa = evento.get('descricao_completa')
+
+        # Processar localização (pode ser dict ou string)
+        localizacao = evento.get('localizacao')
+        if isinstance(localizacao, dict):
+            # Nova estrutura com mais detalhes
+            loc_str = localizacao.get('endereco_completo') or ''
+            if localizacao.get('cep'):
+                loc_str = f"{loc_str} (CEP: {localizacao['cep']})" if loc_str else f"CEP: {localizacao['cep']}"
+            localizacao = loc_str
+        elif not localizacao:
+            localizacao = ''
+
         origem = evento.get('origem') or ''
         destino = evento.get('destino') or ''
         rota = evento.get('rota') or ''
 
+        # Informações adicionais disponíveis
+        info_adicional = evento.get('informacao_adicional') or ''
+        observacoes = evento.get('observacoes') or ''
+
         # Construir mensagem estilo Magalu (ou aplicar template customizado)
         linhas = []
-        
+
         # Saudação personalizada
         if nome_cliente:
             linhas.append(f"{nome_cliente},")
@@ -259,9 +282,9 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
             linhas.append("Olá!")
             linhas.append("")
             linhas.append("Tô passando pra avisar que sua encomenda movimentou! 📦")
-        
+
         linhas.append("")
-        
+
         # Status atual
         emoji_status = '📦'
         if titulo:
@@ -281,11 +304,17 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
                 emoji_status = '⏳'
             elif 'entregue' in titulo.lower() or 'delivered' in titulo.lower():
                 emoji_status = '✅'
-        linhas.append(f"{emoji_status} {titulo}")
+        linhas.append(f"*{titulo}*")
+        linhas.append("")
+
+        # NOVO: Adicionar descrição completa traduzida se disponível
+        if descricao_completa:
+            linhas.append(f"_{descricao_completa}_")
+            linhas.append("")
 
         # Localização se disponível
         if localizacao:
-            linhas.append(f"📍 Localização: {localizacao}")
+            linhas.append(f"📍 *Local:* {localizacao}")
 
         # Rota se disponível
         if origem or destino or rota:
@@ -297,19 +326,19 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
             if rota and not (origem or destino):
                 partes.append(rota)
             if partes:
-                linhas.append(f"🚛 Rota: {' → '.join([p for p in partes if p])}")
+                linhas.append(f"🚛 *Rota:* {' → '.join([p for p in partes if p])}")
 
-        linhas.append("")
-        linhas.append(f"🕒 Última atualização: {data_formatada}")
-        linhas.append("")
-        
-        # Link para rastreio detalhado
-        if codigo_rastreio:
-            linhas.append("Você também pode acompanhar o pedido sempre que quiser pelo link: 👇")
-            linhas.append(f"https://melhorrastreio.com.br/{codigo_rastreio}")
+        # NOVO: Informações adicionais se disponíveis
+        if info_adicional:
+            linhas.append(f"ℹ️  *Info:* {info_adicional}")
+
+        if observacoes:
+            linhas.append(f"📝 *Obs:* {observacoes}")
+
+        if localizacao or origem or destino or rota or info_adicional or observacoes:
             linhas.append("")
 
-        # Se existir template customizado no DB, aplicar substituições
+        # Se existir template customizado no DB, aplicar substituições e retornar
         template_custom = _get_whatsapp_template_from_db()
         if template_custom:
             # Montar blocos para placeholders
@@ -326,17 +355,36 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
 
             info_blocos = []
             if status_line:
-                info_blocos.append(status_line)
+                info_blocos.append(f"*{titulo}*")
+            # NOVO: Adicionar descrição completa
+            if descricao_completa:
+                info_blocos.append("")
+                info_blocos.append(f"_{descricao_completa}_")
+
+            # Adicionar linha vazia antes dos detalhes se houver descrição
+            if descricao_completa and (localizacao or rota_texto or info_adicional or observacoes):
+                info_blocos.append("")
+
             if localizacao:
-                info_blocos.append(f"📍 Localização: {localizacao}")
+                info_blocos.append(f"📍 *Local:* {localizacao}")
             if rota_texto:
-                info_blocos.append(f"🚛 Rota: {rota_texto}")
+                info_blocos.append(f"🚛 *Rota:* {rota_texto}")
+            # NOVO: Adicionar informações extras
+            if info_adicional:
+                info_blocos.append(f"ℹ️  *Info:* {info_adicional}")
+            if observacoes:
+                info_blocos.append(f"📝 *Obs:* {observacoes}")
+
+            # Adicionar linha vazia antes da data se houver informações acima
+            if localizacao or rota_texto or info_adicional or observacoes:
+                info_blocos.append("")
+
             if data_formatada:
-                info_blocos.append(f"🕒 Última atualização: {data_formatada}")
+                info_blocos.append(f"🕒 {data_formatada}")
             info_texto = "\n".join(info_blocos)
 
             final_msg = template_custom
-            # Placeholders suportados
+            # Placeholders suportados (incluindo novos)
             replacements = {
                 "[cliente]": (nome_cliente or "Olá"),
                 "[info]": info_texto,
@@ -344,9 +392,12 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
                 "[link_rastreio]": link_rastreio,
                 "[codigo]": (codigo_rastreio or ""),
                 "[status]": status_line,
+                "[descricao]": (descricao_completa or ""),
                 "[rota]": rota_texto_label,
                 "[localizacao]": (localizacao or ""),
                 "[data]": (data_formatada or ""),
+                "[info_adicional]": (info_adicional or ""),
+                "[observacoes]": (observacoes or ""),
             }
             try:
                 for k, v in replacements.items():
@@ -355,9 +406,17 @@ def formatar_mensagem_rastreio(rastreio_data, shipment_data=None, cliente_nome=N
             except Exception:
                 # Se der erro, cai para o fluxo padrão
                 pass
-        
-        # Caso não use template custom, não injeta vídeo automaticamente; admin pode incluir no template salvo
-        
+
+        # Caso não use template custom, continuar com o fluxo padrão
+        linhas.append(f"🕒 {data_formatada}")
+        linhas.append("")
+
+        # Link para rastreio detalhado
+        if codigo_rastreio:
+            linhas.append("Você também pode acompanhar o pedido sempre que quiser pelo link: 👇")
+            linhas.append(f"https://melhorrastreio.com.br/{codigo_rastreio}")
+            linhas.append("")
+
         linhas.append("Mas pode deixar que assim que tiver alguma novidade, corro aqui pra te avisar! 🏃‍♀️")
         linhas.append("")
         linhas.append("⚠️ Ah, e atenção: nunca solicitamos pagamentos adicionais, dados ou senhas para finalizar a entrega.")
