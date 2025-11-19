@@ -116,19 +116,15 @@ function displayEnvios(envios) {
     }
 
     let html = `
-            <div class="table-responsive" style="background:transparent;">
-                <table class="table table-borderless envios-table" style="color:var(--text);">
-                    <thead style="background: rgba(255,255,255,0.03); color:var(--muted-text); border-bottom:1px solid rgba(255,255,255,0.04);">
-                        <tr>
-                            <th>Transportadora</th>
-                            <th>Código Rastreio</th>
-                            <th>Destinatário</th>
-                            <th>Telefone</th>
-                            <th>Status</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody style="color:var(--muted-text);">
+            <div class="envios-list" style="display:flex;flex-direction:column;gap:8px;background:transparent;">
+                <div class="envios-list-head d-none d-md-flex" style="padding:8px 12px;color:var(--muted-text);font-weight:600;border-bottom:1px solid var(--border);">
+                    <div style="width:18%;">Transportadora</div>
+                    <div style="width:18%;">Código Rastreio</div>
+                    <div style="width:38%;">Destinatário</div>
+                    <div style="width:12%;">Telefone</div>
+                    <div style="width:6%;">Status</div>
+                    <div style="width:8%;text-align:right;">Ações</div>
+                </div>
     `;
 
     envios.shipments.forEach(envio => {
@@ -169,36 +165,36 @@ function displayEnvios(envios) {
         const detailsId = 'details-' + String(envio.id).replace(/[^a-zA-Z0-9-_:.]/g, '');
 
         html += `
-            <tr style="border-bottom:1px solid rgba(255,255,255,0.03);">
-                <td style="padding:12px 16px;"><strong style="color:var(--text);">${displayTransportadora}</strong></td>
-                <td style="padding:12px 16px;">
+            <div class="envio-row" style="display:flex;align-items:center;padding:12px 12px;border-bottom:1px solid var(--border);">
+                <div style="width:18%; color:var(--text); font-weight:600;">${displayTransportadora}</div>
+                <div style="width:18%; display:flex;align-items:center; gap:8px; color:var(--muted-text);">
                     <button class="btn btn-sm btn-outline-secondary" onclick="copyTrackingById('${envio.id}')" title="Copiar código" aria-label="Copiar código">
                         <i class="fas fa-copy"></i>
                     </button>
-                    <span class="codigo" data-bs-toggle="tooltip" title="${codigoRastreio}" style="margin-left:8px; color:var(--muted-text);">${codigoRastreio}</span>
-                </td>
-                <td class="destinatario" style="padding:12px 16px;color:var(--text);">${envio.nome || 'N/A'}</td>
-                <td style="padding:12px 16px; color:var(--muted-text);">${envio.telefone || 'N/A'}</td>
-                <td style="padding:12px 16px; color:var(--muted-text);">
+                    <span class="codigo" data-bs-toggle="tooltip" title="${codigoRastreio}" style="color:var(--muted-text);">${codigoRastreio}</span>
+                </div>
+                <div class="destinatario" style="width:38%; color:var(--text);">${envio.nome || 'N/A'}</div>
+                <div style="width:12%; color:var(--muted-text);" class="d-none d-md-block">${envio.telefone || 'N/A'}</div>
+                <div style="width:6%; color:var(--muted-text);">
                     <button class="btn btn-sm btn-outline-secondary d-none d-md-inline" onclick="openRastreioModal('${envio.id}')" title="Ver detalhes" aria-label="Ver detalhes">
                         <i class="fas fa-info-circle"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-secondary d-md-none" data-bs-toggle="collapse" data-bs-target="#${detailsId}" aria-expanded="false" aria-controls="${detailsId}" data-target="#${detailsId}">
                         <i class="fas fa-angle-down chev-rot"></i>
                     </button>
-                </td>
-                <td style="padding:12px 16px;">
+                </div>
+                <div style="width:8%; text-align:right;">
                     <div class="btn-group btn-group-sm actions" role="group">
                         <button class="btn btn-sm btn-outline-success" onclick="enviarWhatsApp('${envio.id}')" title="Enviar WhatsApp" aria-label="Enviar WhatsApp"><i class="fas fa-paper-plane"></i></button>
                         <button class="btn btn-sm btn-outline-secondary" onclick="openRastreioModal('${envio.id}')" title="Ver detalhes" aria-label="Ver detalhes"><i class="fas fa-eye"></i></button>
                     </div>
-                </td>
-            </tr>
+                </div>
+            </div>
 
-            <tr class="envios-details-row collapse" id="${detailsId}">
-                <td colspan="6">
-                    <div style="display:flex;flex-direction:column;gap:6px;">
-                        <div><span class="detail-label">Código:</span><span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace;">${codigoRastreio}</span></div>
+            <div class="envios-details-row collapse" id="${detailsId}">
+                <div class="glass-card" style="margin:10px 0;padding:12px;">
+                    <div style="display:flex;flex-direction:column;gap:6px;color:var(--muted-text);">
+                        <div><span class="detail-label">Código:</span><span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace;color:var(--text);">${codigoRastreio}</span></div>
                         <div><span class="detail-label">Telefone:</span><span>${envio.telefone || 'N/A'}</span></div>
                         <div><span class="detail-label">Status:</span><span>${envio.rastreio_status || 'N/A'}</span></div>
                         <div class="mt-2">
@@ -207,8 +203,8 @@ function displayEnvios(envios) {
                             <button class="btn btn-sm btn-outline-secondary" onclick="openRastreioModal('${envio.id}')"><i class="fas fa-eye"></i> Ver</button>
                         </div>
                     </div>
-                </td>
-            </tr>
+                </div>
+            </div>
         `;
     });
 
