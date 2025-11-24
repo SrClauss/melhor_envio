@@ -1,19 +1,23 @@
 {% extends "base_modern.html" %}
 
-{% block title %}Modelo de Mensagem - WhatsApp{% endblock %}
+{% block title %}Modelos de Mensagem - WhatsApp{% endblock %}
 
 {% block content %}
 <div class="glass-card">
     <div class="row">
-        <div class="col-12 col-lg-10">
-            <div class="card">
+        <div class="col-12">
+            <!-- TEMPLATE 1: Mensagem de Atualizações (quando o rastreamento muda) -->
+            <div class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
-                    <h2 class="card-title mb-0">Modelo de Mensagem (WhatsApp)</h2>
+                    <div>
+                        <h2 class="card-title mb-0">📦 Mensagem de Atualizações de Rastreamento</h2>
+                        <p class="text-muted mb-0 small">Enviada quando há mudança no status da encomenda</p>
+                    </div>
                     <a href="/dashboard" class="btn btn-outline-secondary btn-sm">Voltar</a>
                 </div>
                 <div class="card-body">
-                    <p class="text-muted">Edite abaixo o texto que será enviado no WhatsApp. Use os placeholders entre colchetes para inserir dados dinâmicos:</p>
-                    <ul>
+                    <p class="text-muted">Edite abaixo o texto que será enviado no WhatsApp quando houver atualização de rastreamento. Use os placeholders entre colchetes:</p>
+                    <ul class="mensagem-list">
                         <li><code>[cliente]</code> Primeiro nome do cliente</li>
                         <li><code>[info]</code> ou <code>[rastreio]</code> Bloco com status, localização, rota e última atualização</li>
                         <li><code>[link_rastreio]</code> Link direto para o Melhor Rastreio</li>
@@ -30,15 +34,46 @@
 
                     <form method="post" action="/mensagem">
                         <div class="mb-3">
-                            <label for="template" class="form-label">Template</label>
+                            <label for="template" class="form-label">Template de Atualizações</label>
                             <textarea id="template" name="template" class="form-control mensagem-textarea" rows="16" required>{{ template_text }}</textarea>
                         </div>
                         <div class="d-flex gap-2">
-                            <button type="submit" class="btn btn-primary">Salvar</button>
+                            <button type="submit" class="btn btn-primary">💾 Salvar Mensagem de Atualizações</button>
                             <a href="/mensagem" class="btn btn-outline-secondary">Descartar alterações</a>
                         </div>
                     </form>
 
+                </div>
+            </div>
+
+            <!-- TEMPLATE 2: Mensagem de Boas-Vindas (quando a etiqueta é criada) -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title mb-0">👋 Mensagem de Boas-Vindas</h2>
+                    <p class="text-muted mb-0 small">Primeira mensagem enviada quando a etiqueta é criada</p>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Esta mensagem é enviada automaticamente quando uma nova etiqueta é detectada. Placeholders disponíveis:</p>
+                    <ul class="mensagem-list">
+                        <li><code>[cliente]</code> Primeiro nome do cliente</li>
+                        <li><code>[codigo]</code> Código de rastreio</li>
+                        <li><code>[link_rastreio]</code> Link direto para o Melhor Rastreio</li>
+                    </ul>
+
+                    <form method="post" action="/mensagem/welcome">
+                        <div class="mb-3">
+                            <label for="template_welcome" class="form-label">Template de Boas-Vindas</label>
+                            <textarea id="template_welcome" name="template_welcome" class="form-control mensagem-textarea" rows="12" required>{{ template_welcome_text }}</textarea>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-success">💾 Salvar Mensagem de Boas-Vindas</button>
+                            <a href="/mensagem" class="btn btn-outline-secondary">Descartar alterações</a>
+                        </div>
+                    </form>
+
+                    <div class="alert alert-info mt-3">
+                        <i class="bi bi-info-circle"></i> <strong>Dica:</strong> A mensagem de boas-vindas é enviada uma única vez quando o sistema detecta uma nova etiqueta pela primeira vez. As mensagens de atualização são enviadas sempre que houver mudança no rastreamento.
+                    </div>
                 </div>
             </div>
         </div>

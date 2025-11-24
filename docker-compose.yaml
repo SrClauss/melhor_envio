@@ -5,4 +5,7 @@ services:
       - "80:8000"
     restart: always
     volumes:
+      # Volume principal do banco de dados
       - /opt/melhor_envio/database.db:/app/database.db:rw
+      # Volume de backups (para scripts de backup)
+      - /opt/melhor_envio/backups:/app/backups:rw
