@@ -37,6 +37,19 @@ DEFAULT_WHATSAPP_TEMPLATE = (
     "Até mais! 💙"
 )
 
+# Template padrão de mensagem de BOAS-VINDAS (primeira mensagem quando etiqueta é criada)
+DEFAULT_WELCOME_TEMPLATE = (
+    "Olá [cliente]! 👋\n\n"
+    "Seu pedido foi postado com sucesso! 📦\n\n"
+    "Código de rastreio: [codigo]\n\n"
+    "Você pode acompanhar sua encomenda pelo link:\n"
+    "[link_rastreio]\n\n"
+    "Vou te avisar automaticamente sempre que houver alguma movimentação! 🚚\n\n"
+    "⚠️ Ah, e atenção: nunca solicitamos pagamentos adicionais, dados ou senhas para finalizar a entrega.\n\n"
+    "Se tiver dúvidas, entre em contato conosco.\n\n"
+    "Até logo! 💙"
+)
+
 def _get_whatsapp_template_from_db(db=None, ttl_seconds: int = 60):
     """Obtém o template customizado do WhatsApp do RocksDB com cache simples.
     Se não existir, retorna o DEFAULT_WHATSAPP_TEMPLATE. Se houver erro ao ler, ignora silenciosamente.
@@ -71,6 +84,48 @@ def _get_whatsapp_template_from_db(db=None, ttl_seconds: int = 60):
         return value
     except Exception:
         return None
+
+
+# Cache para template de boas-vindas (similar ao template principal)
+_WELCOME_TEMPLATE_CACHE = {
+    "value": None,
+    "ts": 0
+}
+
+
+def _get_welcome_template_from_db(db=None, ttl_seconds: int = 60):
+    """Obtém o template de boas-vindas do RocksDB com cache simples.
+    Se não existir, retorna o DEFAULT_WELCOME_TEMPLATE.
+    """
+    try:
+        now = time.time()
+        if _WELCOME_TEMPLATE_CACHE["value"] is not None and (now - _WELCOME_TEMPLATE_CACHE["ts"]) < ttl_seconds:
+            return _WELCOME_TEMPLATE_CACHE["value"]
+
+        raw = None
+        if db is not None:
+            try:
+                raw = db.get(b"config:whatsapp_template_welcome")
+            except Exception:
+                raw = None
+        else:
+            try:
+                raw = rocksdbpy.open('database.db', rocksdbpy.Option()).get(b"config:whatsapp_template_welcome")
+            except Exception:
+                raw = None
+
+        value = raw.decode('utf-8') if raw else None
+
+        # Se não houver no DB, usar default via ENV ou DEFAULT_WELCOME_TEMPLATE
+        if not value:
+            env_default = os.getenv('WHATSAPP_WELCOME_TEMPLATE_DEFAULT', '').strip()
+            value = env_default or DEFAULT_WELCOME_TEMPLATE
+
+        _WELCOME_TEMPLATE_CACHE["value"] = value
+        _WELCOME_TEMPLATE_CACHE["ts"] = now
+        return value
+    except Exception:
+        return DEFAULT_WELCOME_TEMPLATE
 
 
 load_dotenv()
@@ -1388,6 +1443,347 @@ async def forcar_extracao_rastreio_async(db):
     """
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, forcar_extracao_rastreio, db)
+
+
+def formatar_mensagem_boas_vindas(nome_cliente, codigo_rastreio, db=None):
+    """
+    Formata a mensagem de boas-vindas usando o template customizado ou padrão.
+
+    Placeholders suportados:
+        [cliente] - Primeiro nome do cliente
+        [codigo] - Código de rastreio
+        [link_rastreio] - Link para rastreamento
+
+    Args:
+        nome_cliente: Nome completo do cliente
+        codigo_rastreio: Código de rastreio da encomenda
+        db: Instância do banco de dados (opcional)
+
+    Returns:
+        String com a mensagem formatada
+    """
+    # Obter template do banco ou usar padrão
+    template = _get_welcome_template_from_db(db)
+
+    # Extrair primeiro nome
+    primeiro_nome = ""
+    if nome_cliente:
+        primeiro_nome = nome_cliente.split()[0] if nome_cliente.split() else ""
+        primeiro_nome = primeiro_nome.title() if primeiro_nome else "Olá"
+    else:
+        primeiro_nome = "Olá"
+
+    # Link de rastreamento
+    link_rastreio = f"https://melhorrastreio.com.br/{codigo_rastreio}" if codigo_rastreio else ""
+
+    # Substituir placeholders
+    mensagem = template
+    replacements = {
+        "[cliente]": primeiro_nome,
+        "[codigo]": (codigo_rastreio or ""),
+        "[link_rastreio]": link_rastreio,
+    }
+
+    for placeholder, valor in replacements.items():
+        mensagem = mensagem.replace(placeholder, valor)
+
+    return mensagem
+
+
+def enviar_mensagem_boas_vindas(shipment_data, db=None):
+    """
+    Envia mensagem de boas-vindas para um shipment novo.
+
+    Args:
+        shipment_data: Dados do shipment (dict com nome, telefone, tracking)
+        db: Instância do banco de dados
+
+    Returns:
+        True se enviou com sucesso, False caso contrário
+    """
+    try:
+        nome = shipment_data.get('nome', '')
+        telefone = shipment_data.get('telefone', '')
+        codigo_rastreio = shipment_data.get('tracking', '')
+
+        if not telefone:
+            print(f"[WELCOME] Shipment sem telefone, pulando")
+            return False
+
+        if not codigo_rastreio:
+            print(f"[WELCOME] Shipment sem código de rastreio, pulando")
+            return False
+
+        # Formatar mensagem
+        mensagem = formatar_mensagem_boas_vindas(nome, codigo_rastreio, db)
+
+        # Enviar WhatsApp
+        print(f"[WELCOME] Enviando boas-vindas para {telefone} (código: {codigo_rastreio})")
+        resultado = enviar_para_whatsapp(mensagem, telefone)
+
+        print(f"[WELCOME] ✅ Boas-vindas enviada com sucesso para {telefone}")
+        return True
+
+    except Exception as e:
+        print(f"[WELCOME] ❌ Erro ao enviar boas-vindas: {e}")
+        return False
+
+
+def consultar_novos_shipments_welcome(db=None):
+    """
+    Consulta shipments do Melhor Envio e envia mensagem de BOAS-VINDAS para novos envios.
+
+    Esta função é executada pelo cronjob de boas-vindas (a cada 10 minutos).
+    Ela identifica shipments novos (que não estão no banco ou não receberam welcome)
+    e envia a mensagem de apresentação.
+
+    NÃO faz consulta de rastreio (deixa para o cronjob principal).
+    """
+    if db is None:
+        db = rocksdbpy.open('database.db', rocksdbpy.Option())
+
+    token = db.get(b"token:melhor_envio")
+    if not token:
+        raise HTTPException(status_code=401, detail="Token do Melhor Envio não encontrado.")
+    token = token.decode('utf-8')
+
+    status = 'posted'
+    response = requests.get("https://melhorenvio.com.br/api/v2/me/orders", headers={
+        'Authorization': f'Bearer {token}'
+    }, params={
+        'status': status,
+        'page': 1})
+    shipments = []
+
+    if response.status_code == 200:
+        corrent_page = response.json().get('current_page')
+        shipments.extend(response.json().get('data', []))
+        status_code = response.status_code
+
+        # Buscar todas as páginas
+        while status_code == 200:
+            response = requests.get("https://melhorenvio.com.br/api/v2/me/orders", headers={
+                'Authorization': f'Bearer {token}'
+            }, params={
+                'status': status,
+                'page': corrent_page + 1})
+            if response.status_code == 200:
+                corrent_page = response.json().get('current_page')
+                shipments.extend(response.json().get('data', []))
+            else:
+                status_code = response.status_code
+
+        processed_count = 0
+        welcome_sent_count = 0
+
+        for shipment in shipments:
+            shipment_id = shipment.get('id')
+            if not shipment_id:
+                continue
+
+            # Extrair dados necessários
+            to_data = shipment.get('to', {})
+            nome = to_data.get('name', '')
+            telefone = to_data.get('phone', '')
+            codigo_rastreio = shipment.get('tracking', '')
+
+            if not telefone:
+                print(f"[WELCOME] Shipment {shipment_id} sem telefone do destinatário")
+                continue
+
+            # Verificar se existe entrada no banco
+            key = f"etiqueta:{shipment_id}".encode('utf-8')
+            existing_data = db.get(key)
+
+            should_send_welcome = False
+
+            if not existing_data:
+                # Shipment NOVO - nunca visto antes
+                should_send_welcome = True
+                print(f"[WELCOME] Novo shipment detectado: {shipment_id}")
+            else:
+                # Verificar se já enviou mensagem de boas-vindas
+                try:
+                    old_data = json.loads(existing_data.decode('utf-8'))
+                    welcome_sent = old_data.get('welcome_message_sent', False)
+
+                    if not welcome_sent:
+                        should_send_welcome = True
+                        print(f"[WELCOME] Shipment {shipment_id} sem welcome_message_sent")
+                except Exception as e:
+                    print(f"[WELCOME] Erro ao ler dados para {shipment_id}: {e}")
+                    # Se erro ao ler, assumir que não foi enviado
+                    should_send_welcome = True
+
+            # Enviar mensagem de boas-vindas se necessário
+            if should_send_welcome:
+                # Criar/atualizar dados no banco
+                shipment_data = {
+                    'nome': nome,
+                    'telefone': telefone,
+                    'tracking': codigo_rastreio,
+                }
+
+                # Enviar mensagem
+                success = enviar_mensagem_boas_vindas(shipment_data, db)
+
+                if success:
+                    # Marcar como enviado
+                    shipment_data['welcome_message_sent'] = True
+                    shipment_data['welcome_sent_at'] = datetime.now().isoformat()
+
+                    # Salvar no banco
+                    try:
+                        db.set(key, json.dumps(shipment_data, ensure_ascii=False).encode('utf-8'))
+                        welcome_sent_count += 1
+                        print(f"[WELCOME] ✅ Marcado welcome_message_sent para {shipment_id}")
+                    except Exception as e:
+                        print(f"[WELCOME] ❌ Erro ao salvar dados para {shipment_id}: {e}")
+                else:
+                    print(f"[WELCOME] ❌ Falha ao enviar boas-vindas para {shipment_id}")
+
+                # Throttle entre envios
+                time.sleep(random.uniform(2, 3))
+
+            processed_count += 1
+
+        print(f"[WELCOME_RESUMO] Processados: {processed_count} shipments, Boas-vindas enviadas: {welcome_sent_count}")
+
+    else:
+        raise HTTPException(status_code=response.status_code, detail=response.text)
+
+
+async def consultar_novos_shipments_welcome_async(db=None):
+    """
+    Wrapper async para consultar_novos_shipments_welcome.
+    Executa em um executor para não bloquear o event loop.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, consultar_novos_shipments_welcome, db)
+        print(f"[WELCOME_CRON] Consulta de novos shipments executada em {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    except Exception as e:
+        print(f"[WELCOME_CRON] Erro na consulta de novos shipments: {e}")
+
+
+def iniciar_cronjob_boas_vindas(db=None):
+    """
+    Inicia o cronjob de boas-vindas que roda a cada 10 minutos.
+
+    Este cronjob:
+    - Executa a cada 10 minutos (intervalo fixo, configurável via WELCOME_INTERVAL_MINUTES no .env)
+    - Respeita o horário de monitoramento configurado
+    - Evita colisão com o cronjob principal (não executa se estiver muito próximo)
+    - Envia mensagem de boas-vindas para shipments novos
+
+    Returns:
+        String com a próxima execução calculada
+    """
+    sched = get_scheduler()
+
+    # Intervalo configurável via .env (padrão: 10 minutos)
+    interval_minutes = int(os.getenv('WELCOME_INTERVAL_MINUTES', 10))
+
+    # Remover job existente (se houver)
+    try:
+        existing = sched.get_job('welcome_shipments')
+        if existing:
+            sched.remove_job('welcome_shipments')
+            print(f"[WELCOME_CRON] Job anterior removido")
+    except Exception as e:
+        print(f"[WELCOME_CRON] Não foi possível remover job anterior: {e}")
+
+    # Criar trigger de intervalo simples
+    trigger = IntervalTrigger(minutes=interval_minutes, timezone=TZ_UTC)
+
+    # Job que executa as consultas - verifica horário e anti-colisão
+    async def _welcome_job(job_db):
+        now_utc = datetime.now(TZ_UTC)
+        now_brasilia = datetime.now(TZ_DISPLAY)
+        hour_brasilia = now_brasilia.hour
+
+        # Ler horários UTC do banco e converter para Brasília
+        start_h_utc, end_h_utc = _get_monitor_hours(job_db)
+
+        # Converter para Brasília
+        today_utc = now_utc.date()
+        start_dt_utc = datetime(today_utc.year, today_utc.month, today_utc.day, start_h_utc, 0, tzinfo=TZ_UTC)
+        end_dt_utc = datetime(today_utc.year, today_utc.month, today_utc.day, end_h_utc, 0, tzinfo=TZ_UTC)
+
+        start_h_brt = start_dt_utc.astimezone(TZ_DISPLAY).hour
+        end_h_brt = end_dt_utc.astimezone(TZ_DISPLAY).hour
+
+        print(f"[WELCOME_CRON] ⏰ Job disparado em {_fmt_local(now_utc)} (Brasília: {now_brasilia.strftime('%H:%M')})")
+        print(f"[WELCOME_CRON] Range permitido: {start_h_brt:02d}:00 - {end_h_brt:02d}:00 (Brasília)")
+
+        # 1. Verificar se está dentro do horário permitido
+        if not (start_h_brt <= hour_brasilia < end_h_brt):
+            print(f"[WELCOME_CRON] ⏭️  PULANDO: Hora atual {hour_brasilia:02d}:xx fora do range {start_h_brt:02d}:00-{end_h_brt:02d}:00")
+            return
+
+        # 2. Verificar anti-colisão com o cronjob principal
+        try:
+            monitor_job = sched.get_job('monitor_shipments')
+            if monitor_job and monitor_job.next_run_time:
+                next_monitor = monitor_job.next_run_time
+                time_diff = abs((now_utc - next_monitor).total_seconds() / 60)  # diferença em minutos
+
+                # Se estiver a menos de 10 minutos do próximo monitor, pular
+                if time_diff < 10:
+                    print(f"[WELCOME_CRON] ⏭️  PULANDO: Muito próximo do monitor principal (diferença: {time_diff:.1f} min)")
+                    return
+        except Exception as e:
+            print(f"[WELCOME_CRON] ⚠️  Erro ao verificar anti-colisão: {e}")
+
+        # 3. Executar consulta
+        try:
+            print(f"[WELCOME_CRON] ✅ Executando consulta de novos shipments...")
+            await consultar_novos_shipments_welcome_async(job_db)
+        except Exception as e:
+            print(f"[WELCOME_CRON] ❌ Erro ao executar consulta: {e}")
+            import traceback
+            traceback.print_exc()
+
+    try:
+        sched.add_job(
+            _welcome_job,
+            trigger=trigger,
+            args=[db],
+            id='welcome_shipments',
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60,
+        )
+        print(f"[WELCOME_CRON] Cronjob de boas-vindas iniciado (intervalo: {interval_minutes} min)")
+
+        # Exibir próxima execução
+        try:
+            job = sched.get_job('welcome_shipments')
+            if job and job.next_run_time:
+                next_run_str = _fmt_local(job.next_run_time)
+                print(f"[WELCOME_CRON] Próxima execução: {next_run_str}")
+                return next_run_str
+        except Exception as e:
+            print(f"[WELCOME_CRON] Não foi possível obter próxima execução: {e}")
+
+        return f"Em {interval_minutes} minutos"
+    except Exception as e:
+        print(f"[WELCOME_CRON] Erro ao iniciar cronjob: {e}")
+        return f"Erro: {e}"
+
+
+def parar_cronjob_boas_vindas():
+    """Remove o cronjob de boas-vindas (mantém o scheduler vivo)."""
+    try:
+        sched = get_scheduler()
+        if sched.get_job('welcome_shipments'):
+            sched.remove_job('welcome_shipments')
+            print("[WELCOME_CRON] Cronjob de boas-vindas parado (job removido)")
+        else:
+            print("[WELCOME_CRON] Nenhum job de boas-vindas para remover")
+    except Exception as e:
+        print(f"[WELCOME_CRON] Erro ao parar cronjob: {e}")
 
 
 

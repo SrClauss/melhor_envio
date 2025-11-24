@@ -27,6 +27,10 @@ async def lifespan(app: FastAPI):
     print(f"[STARTUP] Iniciando agendamento do monitoramento com intervalo de {interval_minutes} minutos...")
     webhooks.iniciar_monitoramento(interval_minutes=interval_minutes, db=app.state.db)
 
+    # Startup: iniciar cronjob de boas-vindas (mensagem quando etiqueta é criada)
+    print("[STARTUP] Inicializando cronjob de boas-vindas (novos shipments)...")
+    webhooks.iniciar_cronjob_boas_vindas(db=app.state.db)
+
     yield
 
     # Shutdown: encerrar scheduler com segurança
