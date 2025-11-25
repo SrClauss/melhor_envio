@@ -545,11 +545,26 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
             rastreio_detalhado = shipment_data.get('rastreio_detalhado')
             if not rastreio_detalhado or rastreio_detalhado == 'Ainda não processado':
                 raise HTTPException(status_code=400, detail="Não foi possível obter rastreamento atualizado e não há dados salvos")
+
+            # Verificar se os dados do banco também são erro
+            is_error_rastreio_db = not isinstance(rastreio_detalhado, dict) or (isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado)
+            if is_error_rastreio_db:
+                raise HTTPException(status_code=400, detail="Rastreamento com erro. Não é possível enviar mensagem com dados inválidos")
+
+            # Verificar se tem eventos
+            eventos_db = rastreio_detalhado.get('eventos', []) if isinstance(rastreio_detalhado, dict) else []
+            if not eventos_db:
+                raise HTTPException(status_code=400, detail="Rastreamento sem eventos válidos ainda. Aguarde a primeira movimentação")
+
             print(f"[WHATSAPP_MANUAL] Usando rastreamento do banco (API falhou)")
         else:
             # ⭐ Atualizar banco com rastreamento atualizado
             print(f"[WHATSAPP_MANUAL] Rastreamento obtido com sucesso, atualizando banco")
             eventos = rastreio_detalhado.get('eventos', [])
+
+            # Verificar se os dados da API têm eventos válidos
+            if not eventos:
+                raise HTTPException(status_code=400, detail="Rastreamento sem eventos válidos ainda. Aguarde a primeira movimentação")
             if eventos:
                 ultimo_evento = eventos[0]
                 shipment_data['rastreio_detalhado'] = {

@@ -758,11 +758,16 @@ def consultar_shipments(db=None):
                         should_notify = True
                         print(f"[MUDANÇA] {shipment_id}: rastreio atualizado")
 
+            # ⚠️ IMPORTANTE: NÃO enviar primeira mensagem se houver erro no rastreamento
             # Enviar primeira mensagem para etiquetas novas ou antigas sem a flag
-            # A condição is_first_notify garante que enviaremos no primeiro cron job
-            # mesmo quando não há eventos / rastreio válido.
-            if is_first_notify:
-                should_notify = True
+            # APENAS se o rastreamento for válido (sem erro E com eventos)
+            if is_first_notify and not is_error_rastreio:
+                eventos = rastreio_detalhado.get('eventos', [])
+                if eventos:  # Só enviar se tiver eventos válidos
+                    should_notify = True
+                    print(f"[PRIMEIRA_MSG] {shipment_id}: enviando primeira mensagem")
+                else:
+                    print(f"[PRIMEIRA_MSG] {shipment_id}: pulando - sem eventos válidos ainda")
 
             if not existing_data:
                 print(f"[NOVO] Criando entrada para shipment {shipment_id}")
@@ -1512,6 +1517,27 @@ def enviar_mensagem_boas_vindas(shipment_data, db=None):
 
         if not codigo_rastreio:
             print(f"[WELCOME] Shipment sem código de rastreio, pulando")
+            return False
+
+        # ⚠️ IMPORTANTE: Verificar se o rastreio existe e é válido ANTES de enviar
+        # NÃO enviar mensagem de boas-vindas se o rastreamento ainda não está disponível
+        # (evita enviar mensagens de erro como "PARCEL_NOT_FOUND" para o cliente)
+        try:
+            rastreio_check = extrair_rastreio_api(codigo_rastreio)
+            is_error = not isinstance(rastreio_check, dict) or 'erro' in rastreio_check
+
+            if is_error:
+                print(f"[WELCOME] Rastreamento ainda não disponível para {codigo_rastreio}, pulando envio")
+                return False
+
+            # Verificar se tem eventos válidos
+            eventos = rastreio_check.get('eventos', [])
+            if not eventos:
+                print(f"[WELCOME] Rastreamento sem eventos ainda para {codigo_rastreio}, pulando envio")
+                return False
+
+        except Exception as e:
+            print(f"[WELCOME] Erro ao verificar rastreamento para {codigo_rastreio}: {e}, pulando envio")
             return False
 
         # Formatar mensagem
