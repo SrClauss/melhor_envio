@@ -112,20 +112,24 @@ run_migration() {
         return 0
     fi
 
-    # Verificar se Python está disponível
-    if ! command -v python3 &> /dev/null; then
-        print_error "Python3 não está instalado!"
-        exit 1
+    # Verificar se o container está rodando
+    if ! docker-compose ps | grep -q "Up"; then
+        print_warning "Container não está rodando. Iniciando temporariamente para migração..."
+        if ! docker-compose up -d; then
+            print_error "Falha ao iniciar container para migração!"
+            exit 1
+        fi
+        sleep 5  # Aguardar container inicializar
     fi
 
-    # Dry-run primeiro
-    print_step "Executando dry-run da migração..."
-    if python3 migrate_existing_shipments.py --dry-run; then
+    # Dry-run primeiro (executando DENTRO do container)
+    print_step "Executando dry-run da migração (dentro do container)..."
+    if docker-compose exec -T web python3 migrate_existing_shipments.py --dry-run; then
         print_success "Dry-run concluído"
 
         if confirm "Deseja executar a migração de verdade?"; then
-            print_step "Executando migração..."
-            if python3 migrate_existing_shipments.py; then
+            print_step "Executando migração (dentro do container)..."
+            if docker-compose exec -T web python3 migrate_existing_shipments.py; then
                 print_success "Migração concluída"
             else
                 print_error "Falha na migração!"
