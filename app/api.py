@@ -533,6 +533,16 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
         rastreamento_atualizado = False
         try:
             rastreio_detalhado = webhooks.extrair_rastreio_api(codigo_rastreio)
+            
+            # ⚠️ Verificar se é PARCEL_NOT_FOUND - não permitir envio manual
+            if isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado:
+                erro_txt = str(rastreio_detalhado['erro']).lower()
+                if ('parcel_not_found' in erro_txt) or ('parcel not' in erro_txt) or ('not found' in erro_txt):
+                    raise HTTPException(
+                        status_code=400, 
+                        detail="Rastreamento ainda não disponível (PARCEL_NOT_FOUND). Aguarde o objeto ser processado pelos Correios antes de enviar mensagem."
+                    )
+            
             # Atualizar banco com rastreamento atualizado se for válido
             if isinstance(rastreio_detalhado, dict) and 'erro' not in rastreio_detalhado:
                 eventos = rastreio_detalhado.get('eventos', [])
@@ -548,6 +558,8 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
                     rastreamento_atualizado = True
                 else:
                     shipment_data['rastreio_detalhado'] = rastreio_detalhado
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions
         except Exception as e:
             print(f"[WHATSAPP_MANUAL] Erro ao extrair rastreio via GraphQL: {e}")
             # Se falhar, usar dados do banco
