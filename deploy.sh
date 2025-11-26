@@ -122,14 +122,29 @@ run_migration() {
         sleep 5  # Aguardar container inicializar
     fi
 
+    # Copiar script de migração para dentro do container
+    print_step "Copiando script de migração para o container..."
+    CONTAINER_NAME=$(docker-compose ps -q fastapi_app)
+    if [ -z "$CONTAINER_NAME" ]; then
+        print_error "Não foi possível encontrar o container!"
+        exit 1
+    fi
+
+    if docker cp ./migrate_existing_shipments.py "${CONTAINER_NAME}:/app/migrate_existing_shipments.py"; then
+        print_success "Script copiado para o container"
+    else
+        print_error "Falha ao copiar script para o container!"
+        exit 1
+    fi
+
     # Dry-run primeiro (executando DENTRO do container)
     print_step "Executando dry-run da migração (dentro do container)..."
-    if docker-compose exec -T web python3 migrate_existing_shipments.py --dry-run; then
+    if docker-compose exec -T fastapi_app python3 migrate_existing_shipments.py --dry-run; then
         print_success "Dry-run concluído"
 
         if confirm "Deseja executar a migração de verdade?"; then
             print_step "Executando migração (dentro do container)..."
-            if docker-compose exec -T web python3 migrate_existing_shipments.py; then
+            if docker-compose exec -T fastapi_app python3 migrate_existing_shipments.py; then
                 print_success "Migração concluída"
             else
                 print_error "Falha na migração!"
