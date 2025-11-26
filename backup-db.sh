@@ -17,6 +17,12 @@ if [ ! -d "${DB_PATH}" ]; then
     exit 1
 fi
 
+# Parar container para liberar lock do banco de dados
+echo "🛑 Parando container para liberar lock do banco de dados..."
+cd /opt/melhor_envio
+docker compose down
+sleep 2
+
 # Fazer backup
 echo "📦 Iniciando backup do banco de dados..."
 echo "   Origem: ${DB_PATH}"
@@ -43,7 +49,19 @@ if [ $? -eq 0 ]; then
     cd "${BACKUP_DIR}"
     ls -t | grep database_ | tail -n +11 | xargs -r rm -rf
     echo "✅ Limpeza concluída"
+
+    # Reiniciar container
+    echo ""
+    echo "🚀 Reiniciando container..."
+    cd /opt/melhor_envio
+    docker compose up -d
+    echo "✅ Container reiniciado"
 else
     echo "❌ ERRO ao criar backup!"
+    # Tentar reiniciar container mesmo em caso de erro
+    echo "🚀 Tentando reiniciar container..."
+    cd /opt/melhor_envio
+    docker compose up -d
     exit 1
 fi
+
