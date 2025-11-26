@@ -53,7 +53,7 @@ confirm() {
 check_directory() {
     print_step "Verificando diretório..."
 
-    if [ ! -f "main.py" ] || [ ! -f "docker-compose.yaml" ]; then
+    if [ ! -f "main.py" ] || [ ! -f "docker compose.yaml" ]; then
         print_error "Não estou no diretório correto do projeto!"
         print_warning "Execute: cd ${APP_DIR}"
         exit 1
@@ -121,9 +121,9 @@ run_migration() {
     fi
 
     # Verificar se o container está rodando
-    if ! docker-compose ps | grep -q "Up"; then
+    if ! docker compose ps | grep -q "Up"; then
         print_warning "Container não está rodando. Iniciando temporariamente para migração..."
-        if ! docker-compose up -d; then
+        if ! docker compose up -d; then
             print_error "Falha ao iniciar container para migração!"
             exit 1
         fi
@@ -132,7 +132,7 @@ run_migration() {
 
     # Copiar script de migração para dentro do container
     print_step "Copiando script de migração para o container..."
-    CONTAINER_NAME=$(docker-compose ps -q fastapi_app)
+    CONTAINER_NAME=$(docker compose ps -q fastapi_app)
     if [ -z "$CONTAINER_NAME" ]; then
         print_error "Não foi possível encontrar o container!"
         exit 1
@@ -147,12 +147,12 @@ run_migration() {
 
     # Dry-run primeiro (executando DENTRO do container)
     print_step "Executando dry-run da migração (dentro do container)..."
-    if docker-compose exec -T fastapi_app python3 migrate_existing_shipments.py --dry-run; then
+    if docker compose exec -T fastapi_app python3 migrate_existing_shipments.py --dry-run; then
         print_success "Dry-run concluído"
 
         if confirm "Deseja executar a migração de verdade?"; then
             print_step "Executando migração (dentro do container)..."
-            if docker-compose exec -T fastapi_app python3 migrate_existing_shipments.py; then
+            if docker compose exec -T fastapi_app python3 migrate_existing_shipments.py; then
                 print_success "Migração concluída"
             else
                 print_error "Falha na migração!"
@@ -171,7 +171,7 @@ run_migration() {
 stop_containers() {
     print_step "Parando containers..."
 
-    if docker-compose down; then
+    if docker compose down; then
         print_success "Containers parados"
     else
         print_warning "Nenhum container estava rodando ou erro ao parar"
@@ -182,7 +182,7 @@ stop_containers() {
 start_containers() {
     print_step "Rebuilding e iniciando containers..."
 
-    if docker-compose up -d --build; then
+    if docker compose up -d --build; then
         print_success "Containers iniciados"
     else
         print_error "Falha ao iniciar containers!"
@@ -197,30 +197,30 @@ check_health() {
     sleep 5  # Aguardar container inicializar
 
     # Verificar se container está rodando
-    if docker-compose ps | grep -q "Up"; then
+    if docker compose ps | grep -q "Up"; then
         print_success "Container está rodando"
     else
         print_error "Container não está rodando!"
-        print_warning "Verifique os logs: docker-compose logs"
+        print_warning "Verifique os logs: docker compose logs"
         exit 1
     fi
 
     # Mostrar últimas linhas do log
     print_step "Últimas linhas do log:"
-    docker-compose logs --tail=20
+    docker compose logs --tail=20
 }
 
 # Verificar inicialização dos cronjobs
 check_cronjobs() {
     print_step "Verificando inicialização dos cronjobs..."
 
-    if docker-compose logs | grep -E "STARTUP.*Iniciando agendamento" > /dev/null; then
+    if docker compose logs | grep -E "STARTUP.*Iniciando agendamento" > /dev/null; then
         print_success "Cronjob principal inicializado"
     else
         print_warning "Não foi possível confirmar inicialização do cronjob principal"
     fi
 
-    if docker-compose logs | grep -E "STARTUP.*Inicializando cronjob de boas-vindas" > /dev/null; then
+    if docker compose logs | grep -E "STARTUP.*Inicializando cronjob de boas-vindas" > /dev/null; then
         print_success "Cronjob de boas-vindas inicializado"
     else
         print_warning "Não foi possível confirmar inicialização do cronjob de boas-vindas"
@@ -236,7 +236,7 @@ show_next_steps() {
     echo "📝 Próximos passos:"
     echo ""
     echo "1. Verificar logs completos:"
-    echo "   docker-compose logs -f"
+    echo "   docker compose logs -f"
     echo ""
     echo "2. Testar interface de templates:"
     echo "   Acessar: http://seu-servidor/mensagem"
@@ -245,7 +245,7 @@ show_next_steps() {
     echo "   Acessar: http://seu-servidor/envios"
     echo ""
     echo "4. Monitorar cronjob de boas-vindas:"
-    echo "   docker-compose logs -f | grep WELCOME"
+    echo "   docker compose logs -f | grep WELCOME"
     echo ""
     echo "5. Configurar backup semanal (se ainda não configurado):"
     echo "   crontab -e"
