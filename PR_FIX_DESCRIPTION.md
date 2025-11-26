@@ -25,6 +25,11 @@ Isso causava erro: `ModuleNotFoundError: No module named 'rocksdbpy'`
 - Usa estratégia `--no-rebase` para evitar conflitos de branches divergentes
 - Simplifica processo de deploy (sempre pega código aprovado e mergeado)
 
+### Commit 4: `fix: atualiza docker-compose para docker compose (V2)`
+- Substitui todas as ocorrências de `docker-compose` por `docker compose`
+- Compatível com Docker Compose V2 (comando moderno sem hífen)
+- Corrige 15 ocorrências no script de deploy
+
 ## 📝 Mudanças no `deploy.sh`
 
 Variável `BRANCH`:
