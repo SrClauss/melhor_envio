@@ -1,0 +1,45 @@
+# fix: Correção do script de deploy automatizado
+
+## 🐛 Problema
+
+O script `deploy.sh` estava tentando executar a migração de dados (`migrate_existing_shipments.py`) diretamente no host, mas:
+
+1. O Python e as dependências (como `rocksdbpy`) estão instalados **dentro do container Docker**
+2. O script de migração não estava presente dentro do container antigo (antes do rebuild)
+
+Isso causava erro: `ModuleNotFoundError: No module named 'rocksdbpy'`
+
+## ✅ Solução
+
+### Commit 1: `fix: executa migração dentro do container Docker`
+- Modificado para executar o script de migração **dentro do container** usando `docker-compose exec`
+- Garante que o Python e todas as dependências estejam disponíveis
+
+### Commit 2: `fix: copia script de migração para container antes de executar`
+- Adicionado step para copiar o script de migração para dentro do container usando `docker cp`
+- Garante que o script esteja disponível dentro do container antes da execução
+
+## 📝 Mudanças no `deploy.sh`
+
+Função `run_migration()` agora:
+1. Verifica se container está rodando (inicia se necessário)
+2. **Copia** `migrate_existing_shipments.py` para dentro do container
+3. Executa dry-run **dentro do container**: `docker-compose exec -T fastapi_app python3 migrate_existing_shipments.py --dry-run`
+4. Se aprovado, executa migração real **dentro do container**
+
+## 🧪 Testado
+
+O script agora funciona corretamente e consegue:
+- ✅ Acessar o Python 3 dentro do container
+- ✅ Importar o módulo `rocksdbpy` corretamente
+- ✅ Executar a migração de dados com sucesso
+
+## 📦 Arquivo Modificado
+
+- `deploy.sh` - Função `run_migration()` atualizada
+
+---
+
+**Tipo**: Bugfix
+**Prioridade**: Alta (bloqueia deploy automatizado)
+**Impacto**: Script de deploy agora funciona corretamente
