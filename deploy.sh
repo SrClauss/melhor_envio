@@ -5,7 +5,31 @@
 # Melhor Envio - Sistema de Rastreamento
 #######################################
 
-set -e  # Para na primeira falha
+# Função de cleanup em caso de erro
+cleanup_on_error() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo ""
+        print_error "❌ Deploy falhou! Tentando reiniciar container..."
+        echo ""
+
+        # Tentar reiniciar container
+        cd "${APP_DIR}" 2>/dev/null || cd /opt/melhor_envio
+        if docker compose up -d 2>/dev/null; then
+            print_warning "⚠️  Container reiniciado com código ANTERIOR"
+            print_warning "    O deploy NÃO foi concluído, mas o sistema está online"
+            print_warning "    Corrija o erro e execute ./deploy.sh novamente"
+        else
+            print_error "❌ FALHA ao reiniciar container!"
+            print_error "   Execute manualmente: cd ${APP_DIR} && docker compose up -d"
+        fi
+    fi
+}
+
+# Registrar cleanup para rodar em caso de erro
+trap cleanup_on_error EXIT
+
+# Não usar 'set -e' para permitir cleanup controlado
 
 # Cores para output
 RED='\033[0;31m'
@@ -56,7 +80,7 @@ check_directory() {
     if [ ! -f "main.py" ] || [ ! -f "docker-compose.yaml" ]; then
         print_error "Não estou no diretório correto do projeto!"
         print_warning "Execute: cd ${APP_DIR}"
-        exit 1
+        return 1
     fi
 
     print_success "Diretório OK"
@@ -66,18 +90,49 @@ check_directory() {
 backup_database() {
     print_step "Fazendo backup do banco de dados..."
 
-    if [ ! -f "./backup-db.sh" ]; then
-        print_error "Script backup-db.sh não encontrado!"
-        exit 1
+    # Parar container primeiro
+    print_step "Parando container para backup seguro..."
+    docker compose down
+    sleep 2
+
+    BACKUP_DIR="/opt/melhor_envio/backups"
+    DB_PATH="/opt/melhor_envio/database.db"
+    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+    BACKUP_FILE="${BACKUP_DIR}/database_${TIMESTAMP}.db"
+
+    # Criar diretório de backup se não existir
+    mkdir -p "${BACKUP_DIR}"
+
+    # Verificar se o banco existe
+    if [ ! -d "${DB_PATH}" ]; then
+        print_error "Banco de dados não encontrado em ${DB_PATH}"
+        return 1
     fi
 
-    chmod +x ./backup-db.sh
+    # Fazer backup
+    echo "📦 Criando backup..."
+    echo "   Origem: ${DB_PATH}"
+    echo "   Destino: ${BACKUP_FILE}"
 
-    if ./backup-db.sh; then
-        print_success "Backup realizado com sucesso"
+    if cp -r "${DB_PATH}" "${BACKUP_FILE}"; then
+        SIZE=$(du -sh "${BACKUP_FILE}" | cut -f1)
+        print_success "Backup criado: $(basename ${BACKUP_FILE}) (${SIZE})"
+
+        # Limpeza de backups antigos
+        cd "${BACKUP_DIR}"
+        BACKUP_COUNT_BEFORE=$(ls -1 | grep database_ | wc -l)
+        ls -t | grep database_ | tail -n +11 | xargs -r rm -rf
+        BACKUP_COUNT_AFTER=$(ls -1 | grep database_ | wc -l)
+
+        if [ $BACKUP_COUNT_BEFORE -gt 10 ]; then
+            REMOVED=$((BACKUP_COUNT_BEFORE - BACKUP_COUNT_AFTER))
+            echo "   Removidos ${REMOVED} backups antigos (mantendo últimos 10)"
+        fi
+
+        print_success "Backup concluído (${BACKUP_COUNT_AFTER} backups disponíveis)"
     else
-        print_error "Falha no backup!"
-        exit 1
+        print_error "Falha ao criar backup!"
+        return 1
     fi
 }
 
@@ -89,7 +144,9 @@ update_code() {
     if [ -n "$(git status --porcelain)" ]; then
         print_warning "Existem mudanças não commitadas no diretório"
         if ! confirm "Deseja continuar mesmo assim?"; then
-            exit 1
+            print_warning "Deploy cancelado pelo usuário"
+            trap - EXIT
+            exit 0
         fi
     fi
 
@@ -107,7 +164,7 @@ update_code() {
         print_success "Código atualizado da branch ${BRANCH}"
     else
         print_error "Falha ao fazer git pull!"
-        exit 1
+        return 1
     fi
 }
 
@@ -120,50 +177,26 @@ run_migration() {
         return 0
     fi
 
-    # Verificar se o container está rodando
-    if ! docker compose ps | grep -q "Up"; then
-        print_warning "Container não está rodando. Iniciando temporariamente para migração..."
-        if ! docker compose up -d; then
-            print_error "Falha ao iniciar container para migração!"
-            exit 1
-        fi
-        sleep 5  # Aguardar container inicializar
-    fi
-
-    # Copiar script de migração para dentro do container
-    print_step "Copiando script de migração para o container..."
-    CONTAINER_NAME=$(docker compose ps -q fastapi_app)
-    if [ -z "$CONTAINER_NAME" ]; then
-        print_error "Não foi possível encontrar o container!"
-        exit 1
-    fi
-
-    if docker cp ./migrate_existing_shipments.py "${CONTAINER_NAME}:/app/migrate_existing_shipments.py"; then
-        print_success "Script copiado para o container"
-    else
-        print_error "Falha ao copiar script para o container!"
-        exit 1
-    fi
-
-    # Dry-run primeiro (executando DENTRO do container)
-    print_step "Executando dry-run da migração (dentro do container)..."
-    if docker compose exec -T fastapi_app python3 migrate_existing_shipments.py --dry-run; then
+    # Executar migração usando docker compose run (cria container temporário, sem iniciar FastAPI)
+    # Banco está parado, então não há lock
+    print_step "Executando dry-run da migração (container temporário)..."
+    if docker compose run --rm -v "$(pwd)/migrate_existing_shipments.py:/app/migrate_existing_shipments.py:ro" fastapi_app python3 /app/migrate_existing_shipments.py --dry-run; then
         print_success "Dry-run concluído"
 
         if confirm "Deseja executar a migração de verdade?"; then
-            print_step "Executando migração (dentro do container)..."
-            if docker compose exec -T fastapi_app python3 migrate_existing_shipments.py; then
+            print_step "Executando migração..."
+            if docker compose run --rm -v "$(pwd)/migrate_existing_shipments.py:/app/migrate_existing_shipments.py:ro" fastapi_app python3 /app/migrate_existing_shipments.py; then
                 print_success "Migração concluída"
             else
                 print_error "Falha na migração!"
-                exit 1
+                return 1
             fi
         else
-            print_warning "Migração pulada pelo usuário"
+            print_warning "Migração pulada pelo usuário (continuando deploy sem migração)"
         fi
     else
         print_error "Falha no dry-run da migração!"
-        exit 1
+        return 1
     fi
 }
 
@@ -186,7 +219,7 @@ start_containers() {
         print_success "Containers iniciados"
     else
         print_error "Falha ao iniciar containers!"
-        exit 1
+        return 1
     fi
 }
 
@@ -202,7 +235,7 @@ check_health() {
     else
         print_error "Container não está rodando!"
         print_warning "Verifique os logs: docker compose logs"
-        exit 1
+        return 1
     fi
 
     # Mostrar últimas linhas do log
@@ -264,19 +297,23 @@ main() {
     # Confirmação inicial
     if ! confirm "Deseja iniciar o deploy?"; then
         print_warning "Deploy cancelado pelo usuário"
+        trap - EXIT  # Remover trap antes de sair normalmente
         exit 0
     fi
 
-    # Executar passos
-    check_directory
-    backup_database
-    update_code
-    run_migration
-    stop_containers
-    start_containers
-    check_health
-    check_cronjobs
+    # Executar passos (com verificação de erro em cada passo)
+    check_directory || return 1
+    backup_database || return 1  # Já para o container
+    update_code || return 1
+    run_migration || return 1    # Roda com container parado (banco sem lock)
+    start_containers || return 1 # Rebuild e sobe container
+    check_health || return 1
+    check_cronjobs || return 1
     show_next_steps
+
+    # Deploy concluído com sucesso, remover trap de erro
+    trap - EXIT
+    return 0
 }
 
 # Executar script

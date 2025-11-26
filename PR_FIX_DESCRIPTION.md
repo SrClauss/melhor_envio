@@ -41,6 +41,27 @@ Isso causava erro: `ModuleNotFoundError: No module named 'rocksdbpy'`
 - Aplica correção em `backup-db.sh` e `backup-cron-weekly.sh`
 - Garante integridade do backup mesmo em caso de erro (sempre tenta reiniciar)
 
+### Commit 7: `fix: reorganiza fluxo de deploy para evitar lock do RocksDB durante migração`
+- Deploy agora mantém container **parado** após backup
+- Migração usa `docker compose run` (container temporário, sem FastAPI rodando)
+- Banco permanece sem lock durante backup e migração
+- Apenas após migração completa o container é rebuilded e iniciado
+- Novo fluxo: backup (para) → update → migração (temp) → rebuild → start
+
+### Commit 8: `fix: adiciona recuperação automática em caso de falha no deploy`
+- Deploy agora usa `trap EXIT` para capturar erros
+- Se qualquer passo falhar, automaticamente tenta reiniciar container
+- Container reinicia com código ANTERIOR (sistema volta a funcionar)
+- Mensagens claras sobre o que fazer em caso de falha
+- Evita deixar sistema offline por erro no deploy
+
+### Commit 9: `feat: adiciona script de restauração para recuperar sistema`
+- Novo script `restore.sh` para recuperação manual
+- 3 modos: interativo, rápido (último backup), apenas reiniciar
+- Lista todos os backups disponíveis com data e tamanho
+- Restaura banco de dados de qualquer backup
+- Útil para recuperação após problemas no deploy
+
 ## 📝 Mudanças no `deploy.sh`
 
 Variável `BRANCH`:
@@ -52,11 +73,18 @@ Função `update_code()` agora:
 2. Faz `git pull --no-rebase origin master`
 3. Evita erros de branches divergentes
 
+Função `backup_database()` agora:
+1. Para o container com `docker compose down`
+2. Faz backup do banco (sem lock)
+3. **NÃO reinicia** o container (fica parado para migração)
+4. Limpeza automática de backups antigos
+
 Função `run_migration()` agora:
-1. Verifica se container está rodando (inicia se necessário)
-2. **Copia** `migrate_existing_shipments.py` para dentro do container
-3. Executa dry-run **dentro do container**: `docker-compose exec -T fastapi_app python3 migrate_existing_shipments.py --dry-run`
-4. Se aprovado, executa migração real **dentro do container**
+1. Executa com container **parado** (banco sem lock)
+2. Usa `docker compose run --rm` (container temporário)
+3. Monta script de migração como volume read-only
+4. Roda migração e remove container temporário automaticamente
+5. FastAPI não inicia durante migração (apenas Python + dependências)
 
 Scripts de backup (`backup-db.sh` e `backup-cron-weekly.sh`) agora:
 1. Param o container com `docker compose down`
@@ -65,22 +93,44 @@ Scripts de backup (`backup-db.sh` e `backup-cron-weekly.sh`) agora:
 4. Reiniciam o container automaticamente
 5. Em caso de erro, ainda tentam reiniciar o container
 
+Fluxo principal do deploy (`deploy.sh`):
+1. `backup_database` - Para container e faz backup (sem reiniciar)
+2. `update_code` - Pull da master
+3. `run_migration` - Migração com container temporário (banco sem lock)
+4. `start_containers` - Rebuild e inicia container novo
+5. `check_health` + `check_cronjobs` - Validação
+6. Se qualquer passo falhar: `trap EXIT` reinicia container com código anterior
+
+Script de restauração (`restore.sh`):
+- **Modo interativo**: Lista backups e permite escolher
+- **Modo rápido**: `./restore.sh quick` - restaura último backup
+- **Modo restart**: `./restore.sh restart` - apenas reinicia container
+- Usado para recuperação manual após problemas
+
 ## 🧪 Testado
 
 O script agora funciona corretamente e consegue:
 - ✅ Sempre puxar código da branch **master**
 - ✅ Evitar erros de branches divergentes
 - ✅ Usar comandos `docker compose` (V2) corretamente
-- ✅ Acessar o Python 3 dentro do container
-- ✅ Importar o módulo `rocksdbpy` corretamente
-- ✅ Executar a migração de dados com sucesso
-- ✅ Fazer backup sem problemas de lock do RocksDB
+- ✅ Parar container para backup sem lock
+- ✅ Executar migração sem conflito de lock do RocksDB
+- ✅ Usar `docker compose run` para container temporário
+- ✅ Acessar o Python 3 e rocksdbpy corretamente
+- ✅ Completar fluxo inteiro de deploy automaticamente
+- ✅ **Recuperar automaticamente** se algo der errado (container reinicia)
+- ✅ Restaurar backups manualmente com `restore.sh`
+- ✅ Listar backups disponíveis e escolher qual restaurar
 
-## 📦 Arquivos Modificados
+## 📦 Arquivos Criados/Modificados
 
-- `deploy.sh` - Atualizado para usar docker compose V2 e sempre puxar da master
-- `backup-db.sh` - Atualizado para parar container antes de backup
-- `backup-cron-weekly.sh` - Atualizado para parar container antes de backup
+### Novo Arquivo
+- ✨ `restore.sh` - Script de restauração e recuperação do sistema
+
+### Arquivos Modificados
+- 🔧 `deploy.sh` - Fluxo corrigido + recuperação automática em caso de falha
+- 🔧 `backup-db.sh` - Para container antes de backup e reinicia após
+- 🔧 `backup-cron-weekly.sh` - Para container antes de backup e reinicia após
 
 ---
 
