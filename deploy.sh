@@ -5,7 +5,31 @@
 # Melhor Envio - Sistema de Rastreamento
 #######################################
 
-set -e  # Para na primeira falha
+# Função de cleanup em caso de erro
+cleanup_on_error() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo ""
+        print_error "❌ Deploy falhou! Tentando reiniciar container..."
+        echo ""
+
+        # Tentar reiniciar container
+        cd "${APP_DIR}" 2>/dev/null || cd /opt/melhor_envio
+        if docker compose up -d 2>/dev/null; then
+            print_warning "⚠️  Container reiniciado com código ANTERIOR"
+            print_warning "    O deploy NÃO foi concluído, mas o sistema está online"
+            print_warning "    Corrija o erro e execute ./deploy.sh novamente"
+        else
+            print_error "❌ FALHA ao reiniciar container!"
+            print_error "   Execute manualmente: cd ${APP_DIR} && docker compose up -d"
+        fi
+    fi
+}
+
+# Registrar cleanup para rodar em caso de erro
+trap cleanup_on_error EXIT
+
+# Não usar 'set -e' para permitir cleanup controlado
 
 # Cores para output
 RED='\033[0;31m'
@@ -56,7 +80,7 @@ check_directory() {
     if [ ! -f "main.py" ] || [ ! -f "docker-compose.yaml" ]; then
         print_error "Não estou no diretório correto do projeto!"
         print_warning "Execute: cd ${APP_DIR}"
-        exit 1
+        return 1
     fi
 
     print_success "Diretório OK"
@@ -82,7 +106,7 @@ backup_database() {
     # Verificar se o banco existe
     if [ ! -d "${DB_PATH}" ]; then
         print_error "Banco de dados não encontrado em ${DB_PATH}"
-        exit 1
+        return 1
     fi
 
     # Fazer backup
@@ -108,7 +132,7 @@ backup_database() {
         print_success "Backup concluído (${BACKUP_COUNT_AFTER} backups disponíveis)"
     else
         print_error "Falha ao criar backup!"
-        exit 1
+        return 1
     fi
 }
 
@@ -120,7 +144,9 @@ update_code() {
     if [ -n "$(git status --porcelain)" ]; then
         print_warning "Existem mudanças não commitadas no diretório"
         if ! confirm "Deseja continuar mesmo assim?"; then
-            exit 1
+            print_warning "Deploy cancelado pelo usuário"
+            trap - EXIT
+            exit 0
         fi
     fi
 
@@ -138,7 +164,7 @@ update_code() {
         print_success "Código atualizado da branch ${BRANCH}"
     else
         print_error "Falha ao fazer git pull!"
-        exit 1
+        return 1
     fi
 }
 
@@ -163,14 +189,14 @@ run_migration() {
                 print_success "Migração concluída"
             else
                 print_error "Falha na migração!"
-                exit 1
+                return 1
             fi
         else
-            print_warning "Migração pulada pelo usuário"
+            print_warning "Migração pulada pelo usuário (continuando deploy sem migração)"
         fi
     else
         print_error "Falha no dry-run da migração!"
-        exit 1
+        return 1
     fi
 }
 
@@ -193,7 +219,7 @@ start_containers() {
         print_success "Containers iniciados"
     else
         print_error "Falha ao iniciar containers!"
-        exit 1
+        return 1
     fi
 }
 
@@ -209,7 +235,7 @@ check_health() {
     else
         print_error "Container não está rodando!"
         print_warning "Verifique os logs: docker compose logs"
-        exit 1
+        return 1
     fi
 
     # Mostrar últimas linhas do log
@@ -271,18 +297,23 @@ main() {
     # Confirmação inicial
     if ! confirm "Deseja iniciar o deploy?"; then
         print_warning "Deploy cancelado pelo usuário"
+        trap - EXIT  # Remover trap antes de sair normalmente
         exit 0
     fi
 
-    # Executar passos
-    check_directory
-    backup_database  # Já para o container
-    update_code
-    run_migration    # Roda com container parado (banco sem lock)
-    start_containers # Rebuild e sobe container
-    check_health
-    check_cronjobs
+    # Executar passos (com verificação de erro em cada passo)
+    check_directory || return 1
+    backup_database || return 1  # Já para o container
+    update_code || return 1
+    run_migration || return 1    # Roda com container parado (banco sem lock)
+    start_containers || return 1 # Rebuild e sobe container
+    check_health || return 1
+    check_cronjobs || return 1
     show_next_steps
+
+    # Deploy concluído com sucesso, remover trap de erro
+    trap - EXIT
+    return 0
 }
 
 # Executar script
