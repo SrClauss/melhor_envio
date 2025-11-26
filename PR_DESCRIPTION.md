@@ -42,12 +42,19 @@
 - Dry-run disponível para teste
 - Evita mensagens duplicadas para clientes antigos
 
+### 7. Script de Deploy Automatizado 🚀
+- `deploy.sh` automatiza todo o processo de deploy
+- Executa backup → pull → migração → rebuild → health check
+- Interativo com confirmações em passos críticos
+- Valida saúde do sistema após deploy
+
 ---
 
 ## 📦 Arquivos Modificados
 
 ### Novos Arquivos
 - ✨ `DEPLOY.md` - Documentação completa de implantação
+- ✨ `deploy.sh` - Script automatizado de deploy completo
 - ✨ `backup-db.sh` - Script de backup manual
 - ✨ `backup-cron-weekly.sh` - Script de backup semanal
 - ✨ `migrate_existing_shipments.py` - Migração de dados
@@ -64,13 +71,22 @@
 
 ## ⚠️ IMPORTANTE: Instruções de Deploy
 
-### 1️⃣ Backup (OBRIGATÓRIO)
+### 🚀 Opção 1: Deploy Automatizado (RECOMENDADO)
+```bash
+cd /opt/melhor_envio
+./deploy.sh
+```
+O script faz tudo automaticamente: backup → pull → migração → rebuild → validação
+
+### 📝 Opção 2: Deploy Manual
+
+#### 1️⃣ Backup (OBRIGATÓRIO)
 ```bash
 cd /opt/melhor_envio
 ./backup-db.sh
 ```
 
-### 2️⃣ Migração (OBRIGATÓRIO)
+#### 2️⃣ Migração (OBRIGATÓRIO)
 ```bash
 # Dry-run primeiro
 python3 migrate_existing_shipments.py --dry-run
@@ -79,14 +95,14 @@ python3 migrate_existing_shipments.py --dry-run
 python3 migrate_existing_shipments.py
 ```
 
-### 3️⃣ Atualizar e Rebuild
+#### 3️⃣ Atualizar e Rebuild
 ```bash
 git pull origin claude/understand-co-01YQqCTdiPnoqWdtxeSzuQ2m
 docker-compose down
 docker-compose up -d --build
 ```
 
-### 4️⃣ Configurar Backup Semanal (Opcional)
+#### 4️⃣ Configurar Backup Semanal (Opcional)
 ```bash
 chmod +x backup-cron-weekly.sh
 crontab -e
