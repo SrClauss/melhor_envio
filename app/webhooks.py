@@ -759,6 +759,7 @@ def consultar_shipments(db=None):
                         print(f"[MUDANÇA] {shipment_id}: rastreio atualizado")
 
             # Enviar primeira mensagem para etiquetas novas ou antigas sem a flag
+            # Mensagem será enviada independente do status do rastreamento
             if is_first_notify:
                 should_notify = True
                 print(f"[PRIMEIRA_MSG] {shipment_id}: enviando primeira mensagem")

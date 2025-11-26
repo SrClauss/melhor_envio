@@ -530,6 +530,7 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
         print(f"[WHATSAPP_MANUAL] Consultando rastreamento atualizado via GraphQL para {codigo_rastreio}")
 
         rastreio_detalhado = None
+        rastreamento_atualizado = False
         try:
             rastreio_detalhado = webhooks.extrair_rastreio_api(codigo_rastreio)
             print(f"[WHATSAPP_MANUAL] Rastreamento obtido com sucesso, atualizando banco")
@@ -545,6 +546,7 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
                         'ultimo_evento': ultimo_evento,
                         'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
                     }
+                    rastreamento_atualizado = True
                 else:
                     shipment_data['rastreio_detalhado'] = rastreio_detalhado
         except Exception as e:
@@ -569,9 +571,10 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
 
             return {
                 "success": True,
-                "message": "Mensagem WhatsApp enviada com sucesso",
+                "message": "Mensagem WhatsApp enviada com sucesso" + (" (rastreamento atualizado)" if rastreamento_atualizado else " (usando dados salvos)"),
                 "telefone": telefone,
                 "codigo_rastreio": codigo_rastreio,
+                "rastreamento_atualizado": rastreamento_atualizado,
                 "resultado": resultado
             }
         except Exception as e:
