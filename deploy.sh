@@ -53,7 +53,7 @@ confirm() {
 check_directory() {
     print_step "Verificando diretório..."
 
-    if [ ! -f "main.py" ] || [ ! -f "docker compose.yaml" ]; then
+    if [ ! -f "main.py" ] || [ ! -f "docker-compose.yaml" ]; then
         print_error "Não estou no diretório correto do projeto!"
         print_warning "Execute: cd ${APP_DIR}"
         exit 1
