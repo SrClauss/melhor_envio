@@ -533,7 +533,6 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
         rastreamento_atualizado = False
         try:
             rastreio_detalhado = webhooks.extrair_rastreio_api(codigo_rastreio)
-            
             # Atualizar banco com rastreamento atualizado se for válido
             if isinstance(rastreio_detalhado, dict) and 'erro' not in rastreio_detalhado:
                 eventos = rastreio_detalhado.get('eventos', [])
@@ -569,10 +568,10 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
             shipment_data['first_message_sent'] = True
             db.set(key, json.dumps(shipment_data, ensure_ascii=False).encode('utf-8'))
 
-            msg_suffix = " (rastreamento atualizado)" if rastreamento_atualizado else " (usando dados salvos)"
+            data_source_suffix = " (rastreamento atualizado)" if rastreamento_atualizado else " (usando dados salvos)"
             return {
                 "success": True,
-                "message": f"Mensagem WhatsApp enviada com sucesso{msg_suffix}",
+                "message": f"Mensagem WhatsApp enviada com sucesso{data_source_suffix}",
                 "telefone": telefone,
                 "codigo_rastreio": codigo_rastreio,
                 "rastreamento_atualizado": rastreamento_atualizado,
