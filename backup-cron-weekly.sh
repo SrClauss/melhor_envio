@@ -28,6 +28,12 @@ if [ ! -d "${DB_PATH}" ]; then
     exit 1
 fi
 
+# Parar container para liberar lock do banco de dados
+echo "🛑 Parando container para liberar lock do banco de dados..." | tee -a "${LOG_FILE}"
+cd /opt/melhor_envio
+docker compose down
+sleep 2
+
 # Fazer backup
 echo "📦 Criando backup..." | tee -a "${LOG_FILE}"
 echo "   Origem: ${DB_PATH}" | tee -a "${LOG_FILE}"
@@ -50,8 +56,18 @@ if [ $? -eq 0 ]; then
     echo "📊 Total de backups: ${BACKUP_COUNT}" | tee -a "${LOG_FILE}"
 
     echo "✅ Backup semanal concluído com sucesso!" | tee -a "${LOG_FILE}"
+
+    # Reiniciar container
+    echo "🚀 Reiniciando container..." | tee -a "${LOG_FILE}"
+    cd /opt/melhor_envio
+    docker compose up -d
+    echo "✅ Container reiniciado" | tee -a "${LOG_FILE}"
 else
     echo "❌ ERRO ao criar backup!" | tee -a "${LOG_FILE}"
+    # Tentar reiniciar container mesmo em caso de erro
+    echo "🚀 Tentando reiniciar container..." | tee -a "${LOG_FILE}"
+    cd /opt/melhor_envio
+    docker compose up -d
     exit 1
 fi
 
