@@ -17,7 +17,7 @@ NC='\033[0m' # No Color
 # Diretório base (ajustar conforme necessário)
 APP_DIR="/opt/melhor_envio"
 BACKUP_DIR="${APP_DIR}/backups"
-BRANCH="claude/understand-co-01YQqCTdiPnoqWdtxeSzuQ2m"
+BRANCH="master"
 
 # Funções auxiliares
 print_step() {
@@ -93,10 +93,18 @@ update_code() {
         fi
     fi
 
-    # Fazer pull
-    print_step "Executando git pull..."
-    if git pull origin "${BRANCH}"; then
-        print_success "Código atualizado"
+    # Fazer pull (sempre da master, com merge strategy)
+    print_step "Executando git pull da master..."
+
+    # Garantir que estamos na branch master
+    if ! git checkout master 2>/dev/null; then
+        print_warning "Branch master não existe localmente, criando..."
+        git checkout -b master origin/master
+    fi
+
+    # Pull com merge (não rebase)
+    if git pull --no-rebase origin "${BRANCH}"; then
+        print_success "Código atualizado da branch ${BRANCH}"
     else
         print_error "Falha ao fazer git pull!"
         exit 1
