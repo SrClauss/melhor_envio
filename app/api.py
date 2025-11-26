@@ -526,57 +526,34 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
         if not codigo_rastreio:
             raise HTTPException(status_code=400, detail="Shipment não possui código de rastreio")
 
-        # ⭐ NOVO: Consultar rastreamento ATUAL via GraphQL antes de enviar
+        # Consultar rastreamento ATUAL via GraphQL antes de enviar
         print(f"[WHATSAPP_MANUAL] Consultando rastreamento atualizado via GraphQL para {codigo_rastreio}")
 
         rastreio_detalhado = None
         try:
             rastreio_detalhado = webhooks.extrair_rastreio_api(codigo_rastreio)
+            print(f"[WHATSAPP_MANUAL] Rastreamento obtido com sucesso, atualizando banco")
+            
+            # Atualizar banco com rastreamento atualizado se for válido
+            if isinstance(rastreio_detalhado, dict) and 'erro' not in rastreio_detalhado:
+                eventos = rastreio_detalhado.get('eventos', [])
+                if eventos:
+                    ultimo_evento = eventos[0]
+                    shipment_data['rastreio_detalhado'] = {
+                        'codigo_original': rastreio_detalhado.get('codigo_original'),
+                        'status_atual': rastreio_detalhado.get('status_atual'),
+                        'ultimo_evento': ultimo_evento,
+                        'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
+                    }
+                else:
+                    shipment_data['rastreio_detalhado'] = rastreio_detalhado
         except Exception as e:
             print(f"[WHATSAPP_MANUAL] Erro ao extrair rastreio via GraphQL: {e}")
-            # Se falhar, tentar usar dados do banco
+            # Se falhar, usar dados do banco
             rastreio_detalhado = shipment_data.get('rastreio_detalhado')
-
-        # Verificar se obteve rastreamento válido
-        is_error_rastreio = not isinstance(rastreio_detalhado, dict) or (isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado)
-
-        if is_error_rastreio:
-            # Tentar usar dados do banco como fallback
-            rastreio_detalhado = shipment_data.get('rastreio_detalhado')
-            if not rastreio_detalhado or rastreio_detalhado == 'Ainda não processado':
-                raise HTTPException(status_code=400, detail="Não foi possível obter rastreamento atualizado e não há dados salvos")
-
-            # Verificar se os dados do banco também são erro
-            is_error_rastreio_db = not isinstance(rastreio_detalhado, dict) or (isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado)
-            if is_error_rastreio_db:
-                raise HTTPException(status_code=400, detail="Rastreamento com erro. Não é possível enviar mensagem com dados inválidos")
-
-            # Verificar se tem eventos
-            eventos_db = rastreio_detalhado.get('eventos', []) if isinstance(rastreio_detalhado, dict) else []
-            if not eventos_db:
-                raise HTTPException(status_code=400, detail="Rastreamento sem eventos válidos ainda. Aguarde a primeira movimentação")
-
             print(f"[WHATSAPP_MANUAL] Usando rastreamento do banco (API falhou)")
-        else:
-            # ⭐ Atualizar banco com rastreamento atualizado
-            print(f"[WHATSAPP_MANUAL] Rastreamento obtido com sucesso, atualizando banco")
-            eventos = rastreio_detalhado.get('eventos', [])
 
-            # Verificar se os dados da API têm eventos válidos
-            if not eventos:
-                raise HTTPException(status_code=400, detail="Rastreamento sem eventos válidos ainda. Aguarde a primeira movimentação")
-            if eventos:
-                ultimo_evento = eventos[0]
-                shipment_data['rastreio_detalhado'] = {
-                    'codigo_original': rastreio_detalhado.get('codigo_original'),
-                    'status_atual': rastreio_detalhado.get('status_atual'),
-                    'ultimo_evento': ultimo_evento,
-                    'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
-                }
-            else:
-                shipment_data['rastreio_detalhado'] = rastreio_detalhado
-
-        # Formatar mensagem com dados atualizados
+        # Formatar mensagem com dados disponíveis
         try:
             mensagem = webhooks.formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment_data, nome)
         except Exception as e:
@@ -592,10 +569,9 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
 
             return {
                 "success": True,
-                "message": "Mensagem WhatsApp enviada com sucesso (com rastreamento atualizado)",
+                "message": "Mensagem WhatsApp enviada com sucesso",
                 "telefone": telefone,
                 "codigo_rastreio": codigo_rastreio,
-                "rastreamento_atualizado": not is_error_rastreio,
                 "resultado": resultado
             }
         except Exception as e:
