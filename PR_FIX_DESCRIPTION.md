@@ -30,6 +30,17 @@ Isso causava erro: `ModuleNotFoundError: No module named 'rocksdbpy'`
 - Compatível com Docker Compose V2 (comando moderno sem hífen)
 - Corrige 15 ocorrências no script de deploy
 
+### Commit 5: `fix: corrige verificação do arquivo docker-compose.yaml`
+- Corrige verificação do nome do arquivo (mantém hífen no nome do arquivo)
+- Apenas os comandos mudaram para `docker compose`, o arquivo continua sendo `docker-compose.yaml`
+
+### Commit 6: `fix: para container antes de fazer backup para evitar lock do RocksDB`
+- Scripts de backup agora param o container antes de copiar o banco
+- Evita problemas com arquivo LOCK do RocksDB
+- Reinicia container automaticamente após backup
+- Aplica correção em `backup-db.sh` e `backup-cron-weekly.sh`
+- Garante integridade do backup mesmo em caso de erro (sempre tenta reiniciar)
+
 ## 📝 Mudanças no `deploy.sh`
 
 Variável `BRANCH`:
@@ -47,18 +58,29 @@ Função `run_migration()` agora:
 3. Executa dry-run **dentro do container**: `docker-compose exec -T fastapi_app python3 migrate_existing_shipments.py --dry-run`
 4. Se aprovado, executa migração real **dentro do container**
 
+Scripts de backup (`backup-db.sh` e `backup-cron-weekly.sh`) agora:
+1. Param o container com `docker compose down`
+2. Aguardam 2 segundos para garantir liberação do lock
+3. Copiam o banco de dados com segurança
+4. Reiniciam o container automaticamente
+5. Em caso de erro, ainda tentam reiniciar o container
+
 ## 🧪 Testado
 
 O script agora funciona corretamente e consegue:
 - ✅ Sempre puxar código da branch **master**
 - ✅ Evitar erros de branches divergentes
+- ✅ Usar comandos `docker compose` (V2) corretamente
 - ✅ Acessar o Python 3 dentro do container
 - ✅ Importar o módulo `rocksdbpy` corretamente
 - ✅ Executar a migração de dados com sucesso
+- ✅ Fazer backup sem problemas de lock do RocksDB
 
-## 📦 Arquivo Modificado
+## 📦 Arquivos Modificados
 
-- `deploy.sh` - Função `run_migration()` atualizada
+- `deploy.sh` - Atualizado para usar docker compose V2 e sempre puxar da master
+- `backup-db.sh` - Atualizado para parar container antes de backup
+- `backup-cron-weekly.sh` - Atualizado para parar container antes de backup
 
 ---
 
