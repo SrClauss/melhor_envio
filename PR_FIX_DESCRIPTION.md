@@ -19,7 +19,22 @@ Isso causava erro: `ModuleNotFoundError: No module named 'rocksdbpy'`
 - Adicionado step para copiar o script de migração para dentro do container usando `docker cp`
 - Garante que o script esteja disponível dentro do container antes da execução
 
+### Commit 3: `fix: script de deploy sempre puxa da branch master`
+- Script de deploy agora sempre faz `git pull` da branch **master**
+- Garante que está na branch master antes de fazer pull
+- Usa estratégia `--no-rebase` para evitar conflitos de branches divergentes
+- Simplifica processo de deploy (sempre pega código aprovado e mergeado)
+
 ## 📝 Mudanças no `deploy.sh`
+
+Variável `BRANCH`:
+- Alterada de branch específica para `"master"`
+- Garante que deploy sempre usa código aprovado
+
+Função `update_code()` agora:
+1. Garante que está na branch **master** (cria se não existir)
+2. Faz `git pull --no-rebase origin master`
+3. Evita erros de branches divergentes
 
 Função `run_migration()` agora:
 1. Verifica se container está rodando (inicia se necessário)
@@ -30,6 +45,8 @@ Função `run_migration()` agora:
 ## 🧪 Testado
 
 O script agora funciona corretamente e consegue:
+- ✅ Sempre puxar código da branch **master**
+- ✅ Evitar erros de branches divergentes
 - ✅ Acessar o Python 3 dentro do container
 - ✅ Importar o módulo `rocksdbpy` corretamente
 - ✅ Executar a migração de dados com sucesso
