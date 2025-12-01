@@ -793,9 +793,15 @@ def consultar_shipments(db=None):
 
             # Enviar primeira mensagem para etiquetas novas ou antigas sem a flag
             # ⚠️ IMPORTANTE: NÃO enviar se for erro PARCEL_NOT_FOUND
+            # ⚠️ IMPORTANTE: NÃO enviar se rastreio não tem eventos (evita "Sem movimentação registrada")
             if is_first_notify and not is_parcel_not_found:
-                should_notify = True
-                print(f"[PRIMEIRA_MSG] {shipment_id}: enviando primeira mensagem")
+                # Verificar se há eventos válidos antes de enviar
+                eventos_validos = rastreio_detalhado.get('eventos', []) if isinstance(rastreio_detalhado, dict) and not is_error_rastreio else []
+                if eventos_validos:
+                    should_notify = True
+                    print(f"[PRIMEIRA_MSG] {shipment_id}: enviando primeira mensagem")
+                else:
+                    print(f"[PRIMEIRA_MSG] {shipment_id}: pulando - sem eventos válidos ainda")
 
             if not existing_data:
                 print(f"[NOVO] Criando entrada para shipment {shipment_id}")
