@@ -1527,17 +1527,21 @@ def enviar_mensagem_boas_vindas(shipment_data, db=None):
             is_error = not isinstance(rastreio_check, dict) or 'erro' in rastreio_check
 
             if is_error:
-                print(f"[WELCOME] Rastreamento ainda não disponível para {codigo_rastreio}, pulando envio")
+                erro_tipo = rastreio_check.get('erro', 'UNKNOWN') if isinstance(rastreio_check, dict) else 'INVALID_DATA'
+                print(f"[WELCOME] Rastreamento ainda não disponível para {codigo_rastreio} (erro: {erro_tipo}), pulando envio")
+                print(f"[WELCOME] ℹ️  Etiquetas recém-criadas podem levar algumas horas para serem indexadas pelos Correios")
                 return False
 
             # Verificar se tem eventos válidos
             eventos = rastreio_check.get('eventos', [])
             if not eventos:
-                print(f"[WELCOME] Rastreamento sem eventos ainda para {codigo_rastreio}, pulando envio")
+                print(f"[WELCOME] Rastreamento {codigo_rastreio} sem eventos ainda, pulando envio")
+                print(f"[WELCOME] ℹ️  Aguardando primeira movimentação dos Correios. Será enviado automaticamente quando houver eventos")
                 return False
 
         except Exception as e:
             print(f"[WELCOME] Erro ao verificar rastreamento para {codigo_rastreio}: {e}, pulando envio")
+            print(f"[WELCOME] ℹ️  Tentará novamente na próxima verificação automática")
             return False
 
         # Formatar mensagem
