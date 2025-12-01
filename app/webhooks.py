@@ -647,9 +647,13 @@ def consultar_shipments(db=None):
                 print(f"Shipment {shipment_id} sem telefone do destinatário")
                 continue
             
-            # Obter rastreamento atual
-            # Nova estratégia: Rate limits vão para fila de retry
-            codigo_rastreio = shipment.get('tracking')
+            # Obter rastreamento atual usando API com retries controlados.
+            # Estratégia:
+            # - Retentar para casos transitórios: HTTP 429 (rate limit), timeouts, e erros conhecidos como PARCEL_NOT_FOUND
+            # - Pausar um pouco entre tentativas (backoff simples)
+            # - Não enviar notificação caso a extração não retorne eventos válidos (já tratado mais adiante)
+            codigo_rastreio = shipment.get('tracking')  # Código da transportadora (pode demorar para aparecer)
+            codigo_self_tracking = shipment.get('self_tracking')  # Código próprio do Melhor Envio (disponível imediatamente)
             if codigo_rastreio:
                 max_retries = int(os.getenv('WEBHOOKS_MAX_RETRIES', 3))
                 rastreio_detalhado = None
@@ -803,6 +807,9 @@ def consultar_shipments(db=None):
             # Salvar o código de rastreio do próprio objeto (tracking) sempre que presente
             if codigo_rastreio:
                 merged['tracking'] = codigo_rastreio
+            # Salvar também o self_tracking (código próprio do Melhor Envio)
+            if codigo_self_tracking:
+                merged['self_tracking'] = codigo_self_tracking
 
             # Só atualizar rastreio_detalhado quando for uma extração válida
             if not is_error_rastreio:
@@ -1414,7 +1421,8 @@ def forcar_extracao_rastreio(db=None):
                 continue
             
             # Obter rastreamento atual usando API com retry para 429
-            codigo_rastreio = shipment.get('tracking')
+            codigo_rastreio = shipment.get('tracking')  # Código da transportadora
+            codigo_self_tracking = shipment.get('self_tracking')  # Código próprio do Melhor Envio
             if codigo_rastreio:
                 max_retries = 3
                 for attempt in range(max_retries):
@@ -1467,6 +1475,9 @@ def forcar_extracao_rastreio(db=None):
             # Salvar o código de rastreio do próprio objeto (tracking) sempre que presente
             if codigo_rastreio:
                 merged['tracking'] = codigo_rastreio
+            # Salvar também o self_tracking (código próprio do Melhor Envio)
+            if codigo_self_tracking:
+                merged['self_tracking'] = codigo_self_tracking
 
             # Só atualizar rastreio_detalhado quando for uma extração válida
             if not is_error_rastreio:
@@ -1618,8 +1629,13 @@ def enviar_mensagem_boas_vindas(shipment_data, db=None):
     """
     Envia mensagem de boas-vindas para um shipment novo.
 
+    NOVA LÓGICA:
+    - Primeiro tenta usar o código 'tracking' (transportadora)
+    - Se não disponível ou sem eventos, tenta 'self_tracking' (Melhor Envio)
+    - Envia mensagem se QUALQUER um dos códigos estiver disponível
+
     Args:
-        shipment_data: Dados do shipment (dict com nome, telefone, tracking)
+        shipment_data: Dados do shipment (dict com nome, telefone, tracking, self_tracking)
         db: Instância do banco de dados
 
     Returns:
@@ -1628,38 +1644,75 @@ def enviar_mensagem_boas_vindas(shipment_data, db=None):
     try:
         nome = shipment_data.get('nome', '')
         telefone = shipment_data.get('telefone', '')
-        codigo_rastreio = shipment_data.get('tracking', '')
+        codigo_rastreio = shipment_data.get('tracking', '')  # Código da transportadora
+        codigo_self_tracking = shipment_data.get('self_tracking', '')  # Código Melhor Envio
 
         if not telefone:
             print(f"[WELCOME] Shipment sem telefone, pulando")
             return False
 
-        if not codigo_rastreio:
-            print(f"[WELCOME] Shipment sem código de rastreio, pulando")
+        if not codigo_rastreio and not codigo_self_tracking:
+            print(f"[WELCOME] Shipment sem nenhum código de rastreio (tracking ou self_tracking), pulando")
             return False
 
-        # ⚠️ IMPORTANTE: Verificar se rastreio é PARCEL_NOT_FOUND antes de enviar
-        # NÃO enviar boas-vindas se rastreio ainda não está disponível
-        try:
-            rastreio_check = extrair_rastreio_api(codigo_rastreio)
-            if isinstance(rastreio_check, dict) and 'erro' in rastreio_check:
-                erro_txt = str(rastreio_check['erro']).lower()
-                if ('parcel_not_found' in erro_txt) or ('parcel not' in erro_txt) or ('not found' in erro_txt):
-                    print(f"[WELCOME] Rastreio PARCEL_NOT_FOUND para {codigo_rastreio} - não enviando boas-vindas ainda")
-                    return False
-        except Exception as e:
-            print(f"[WELCOME] Erro ao verificar rastreio para {codigo_rastreio}: {e}")
-            # Em caso de erro na verificação, continuar e enviar mesmo assim
-            pass
+        # 🎯 NOVA LÓGICA: Tentar primeiro o tracking da transportadora, depois o self_tracking
+        codigo_para_usar = None
+        tipo_codigo = None
 
-        # Formatar mensagem
-        mensagem = formatar_mensagem_boas_vindas(nome, codigo_rastreio, db)
+        # Tentativa 1: Verificar tracking da transportadora
+        if codigo_rastreio:
+            try:
+                rastreio_check = extrair_rastreio_api(codigo_rastreio)
+                is_error = not isinstance(rastreio_check, dict) or 'erro' in rastreio_check
+                eventos = rastreio_check.get('eventos', []) if isinstance(rastreio_check, dict) else []
+
+                if not is_error and eventos:
+                    # Sucesso! Tracking da transportadora está disponível e tem eventos
+                    codigo_para_usar = codigo_rastreio
+                    tipo_codigo = 'tracking'
+                    print(f"[WELCOME] ✅ Tracking da transportadora disponível: {codigo_rastreio}")
+                else:
+                    erro_tipo = rastreio_check.get('erro', 'UNKNOWN') if isinstance(rastreio_check, dict) else 'INVALID_DATA'
+                    print(f"[WELCOME] ⚠️  Tracking da transportadora {codigo_rastreio} não disponível (erro: {erro_tipo}) ou sem eventos")
+
+            except Exception as e:
+                print(f"[WELCOME] ⚠️  Erro ao verificar tracking da transportadora {codigo_rastreio}: {e}")
+
+        # Tentativa 2: Se tracking não funcionou, tentar self_tracking
+        if not codigo_para_usar and codigo_self_tracking:
+            print(f"[WELCOME] 🔄 Tentando self_tracking do Melhor Envio: {codigo_self_tracking}")
+            try:
+                rastreio_check = extrair_rastreio_api(codigo_self_tracking)
+                is_error = not isinstance(rastreio_check, dict) or 'erro' in rastreio_check
+                eventos = rastreio_check.get('eventos', []) if isinstance(rastreio_check, dict) else []
+
+                if not is_error and eventos:
+                    # Sucesso! Self tracking está disponível
+                    codigo_para_usar = codigo_self_tracking
+                    tipo_codigo = 'self_tracking'
+                    print(f"[WELCOME] ✅ Self tracking do Melhor Envio disponível: {codigo_self_tracking}")
+                else:
+                    erro_tipo = rastreio_check.get('erro', 'UNKNOWN') if isinstance(rastreio_check, dict) else 'INVALID_DATA'
+                    print(f"[WELCOME] ⚠️  Self tracking {codigo_self_tracking} não disponível (erro: {erro_tipo}) ou sem eventos")
+
+            except Exception as e:
+                print(f"[WELCOME] ⚠️  Erro ao verificar self_tracking {codigo_self_tracking}: {e}")
+
+        # Verificar se conseguimos um código válido
+        if not codigo_para_usar:
+            print(f"[WELCOME] ❌ Nenhum código de rastreio disponível para envio")
+            print(f"[WELCOME] ℹ️  Etiquetas recém-criadas podem levar algumas horas para serem indexadas")
+            print(f"[WELCOME] ℹ️  Tentará novamente na próxima verificação automática")
+            return False
+
+        # Formatar mensagem usando o código que funcionou
+        mensagem = formatar_mensagem_boas_vindas(nome, codigo_para_usar, db)
 
         # Enviar WhatsApp
-        print(f"[WELCOME] Enviando boas-vindas para {telefone} (código: {codigo_rastreio})")
+        print(f"[WELCOME] 📤 Enviando boas-vindas para {telefone} (código {tipo_codigo}: {codigo_para_usar})")
         resultado = enviar_para_whatsapp(mensagem, telefone)
 
-        print(f"[WELCOME] ✅ Boas-vindas enviada com sucesso para {telefone}")
+        print(f"[WELCOME] ✅ Boas-vindas enviada com sucesso para {telefone} usando {tipo_codigo}")
         return True
 
     except Exception as e:
@@ -1723,7 +1776,8 @@ def consultar_novos_shipments_welcome(db=None):
             to_data = shipment.get('to', {})
             nome = to_data.get('name', '')
             telefone = to_data.get('phone', '')
-            codigo_rastreio = shipment.get('tracking', '')
+            codigo_rastreio = shipment.get('tracking', '')  # Código da transportadora
+            codigo_self_tracking = shipment.get('self_tracking', '')  # Código próprio do Melhor Envio
 
             if not telefone:
                 print(f"[WELCOME] Shipment {shipment_id} sem telefone do destinatário")
@@ -1760,6 +1814,7 @@ def consultar_novos_shipments_welcome(db=None):
                     'nome': nome,
                     'telefone': telefone,
                     'tracking': codigo_rastreio,
+                    'self_tracking': codigo_self_tracking,
                 }
 
                 # Enviar mensagem
