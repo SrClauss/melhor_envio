@@ -166,6 +166,10 @@ class MelhorRastreio:
                         shippingService
                         trackerInternalId
                     }
+                    pudos {
+                        type
+                        trackingCode
+                    }
                     trackingEvents {
                         trackingCode
                         createdAt
@@ -181,6 +185,32 @@ class MelhorRastreio:
                         additionalInfo
                         notifiedAt
                         trackerType
+                        location {
+                            zipcode
+                            address
+                            locality
+                            number
+                            complement
+                            city
+                            state
+                            country
+                        }
+                    }
+                    pudoEvents {
+                        pudoType
+                        trackingCode
+                        createdAt
+                        registeredAt
+                        source
+                        translatedEventId
+                        status
+                        title
+                        description
+                        notes
+                        from
+                        to
+                        additionalInfo
+                        notifiedAt
                         location {
                             zipcode
                             address
@@ -238,7 +268,22 @@ class MelhorRastreio:
         
         # Extrair informações do tracker
         trackers = dados_brutos.get('trackers', [])
-        eventos = dados_brutos.get('trackingEvents', [])
+        tracking_events = dados_brutos.get('trackingEvents', []) or []
+        pudo_events_raw = dados_brutos.get('pudoEvents', []) or []
+
+        # Normalize PUDO events and include them in the event stream
+        pudo_events = []
+        for pe in pudo_events_raw:
+            norm = dict(pe)
+            pudo_type = pe.get('pudoType')
+            if pudo_type:
+                norm['trackerType'] = f"pudo:{pudo_type}"
+            # Map createdAt -> registeredAt if needed
+            if 'registeredAt' not in norm and 'createdAt' in norm:
+                norm['registeredAt'] = norm.get('createdAt')
+            pudo_events.append(norm)
+
+        eventos = list(tracking_events) + list(pudo_events)
         
         # Informações básicas
         info_basica = self._extrair_info_basica(trackers, codigo_original)
@@ -252,6 +297,7 @@ class MelhorRastreio:
         # Montar resultado final
         resultado = {
             **info_basica,
+            'pudos': dados_brutos.get('pudos', []),
             'total_eventos': len(eventos_processados),
             'status_atual': status_atual,
             'ultima_atualizacao': eventos_processados[0]['data_registro'] if eventos_processados else None,
