@@ -583,6 +583,11 @@ def consultar_shipments(db=None):
     """
     Consulta shipments do Melhor Envio e monitora mudanças de rastreio.
     Envia WhatsApp para clientes quando há nova movimentação.
+    
+    Implementa sistema robusto de retries para rate limits:
+    - Shipments com rate limit (429) são colocados em fila de retry
+    - Retenta até que não haja mais erros de rate limit
+    - PARCEL_NOT_FOUND não envia mensagem ao cliente
     """
     if db is None:
         db = rocksdbpy.open('database.db', rocksdbpy.Option())
@@ -622,6 +627,9 @@ def consultar_shipments(db=None):
         notifications_sent = 0
         current_shipment_ids = set()
         
+        # Fila para retries de rate limit - processados ao final
+        rate_limit_queue = []
+        
         for shipment in shipments:
             shipment_id = shipment.get('id')
             if not shipment_id:
@@ -649,6 +657,8 @@ def consultar_shipments(db=None):
             if codigo_rastreio:
                 max_retries = int(os.getenv('WEBHOOKS_MAX_RETRIES', 3))
                 rastreio_detalhado = None
+                has_rate_limit = False
+                
                 for attempt in range(1, max_retries + 1):
                     try:
                         rastreio_detalhado = extrair_rastreio_api(codigo_rastreio)
@@ -667,7 +677,7 @@ def consultar_shipments(db=None):
                         txt = str(rastreio_detalhado)
                     txt_low = txt.lower()
 
-                    # Retry para rate limit (429)
+                    # Rate limit (429) - marcar para fila de retry
                     if ('429' in txt_low) or ('rate limit' in txt_low):
                         if attempt < max_retries:
                             sleep_time = random.uniform(10, 12)
@@ -675,11 +685,13 @@ def consultar_shipments(db=None):
                             time.sleep(sleep_time)
                             continue
                         else:
-                            print(f"[RATE LIMIT] Máximo de tentativas atingido para {codigo_rastreio}")
+                            # Máximo de tentativas atingido - adicionar à fila para retry posterior
+                            print(f"[RATE LIMIT] Adicionando {codigo_rastreio} à fila de retry")
+                            has_rate_limit = True
                             break
 
-                    # Retry para erros transitórios / parcel not found / timeout
-                    if ('parcel_not_found' in txt_low) or ('parcel not' in txt_low) or ('not found' in txt_low) or ('timeout' in txt_low) or ('timed out' in txt_low):
+                    # Timeout - retry
+                    if ('timeout' in txt_low) or ('timed out' in txt_low):
                         if attempt < max_retries:
                             sleep_time = random.uniform(1, 3)
                             print(f"[RETRY] Pausando por {sleep_time:.2f}s antes de nova tentativa para {codigo_rastreio} (tentativa {attempt}/{max_retries})")
@@ -689,8 +701,20 @@ def consultar_shipments(db=None):
                             print(f"[RETRY] Máximo de tentativas atingido para {codigo_rastreio}")
                             break
 
+                    # PARCEL_NOT_FOUND - não fazer retry, será filtrado depois
+                    # (não envia mensagem para cliente)
+                    if ('parcel_not_found' in txt_low) or ('parcel not' in txt_low) or ('not found' in txt_low):
+                        print(f"[PARCEL_NOT_FOUND] Rastreio ainda não disponível para {codigo_rastreio}")
+                        break
+
                     # Caso não seja um erro identificável para retry, sair
                     break
+                
+                # Se tem rate limit, adicionar à fila para processar depois
+                if has_rate_limit:
+                    rate_limit_queue.append(shipment)
+                    continue
+                    
                 # Se não obteve resultado, normalizar texto
                 if rastreio_detalhado is None:
                     rastreio_detalhado = {"erro": "Sem resultado da extração"}
@@ -719,6 +743,14 @@ def consultar_shipments(db=None):
                 is_error_rastreio = not isinstance(rastreio_detalhado, dict) or (isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado)
             except Exception:
                 is_error_rastreio = True
+            
+            # Verificar se é especificamente erro PARCEL_NOT_FOUND (não enviar ao cliente)
+            is_parcel_not_found = False
+            if is_error_rastreio and isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado:
+                erro_txt = str(rastreio_detalhado['erro']).lower()
+                if ('parcel_not_found' in erro_txt) or ('parcel not' in erro_txt) or ('not found' in erro_txt):
+                    is_parcel_not_found = True
+                    print(f"[PARCEL_NOT_FOUND] Não enviará mensagem para {shipment_id} - aguardando rastreio ficar disponível")
 
             # Determinar se vamos enviar a primeira mensagem (ao criar a etiqueta ou se ainda não foi enviada)
             is_first_notify = False
@@ -759,16 +791,11 @@ def consultar_shipments(db=None):
                         should_notify = True
                         print(f"[MUDANÇA] {shipment_id}: rastreio atualizado")
 
-            # ⚠️ IMPORTANTE: NÃO enviar primeira mensagem se houver erro no rastreamento
             # Enviar primeira mensagem para etiquetas novas ou antigas sem a flag
-            # APENAS se o rastreamento for válido (sem erro E com eventos)
-            if is_first_notify and not is_error_rastreio:
-                eventos = rastreio_detalhado.get('eventos', [])
-                if eventos:  # Só enviar se tiver eventos válidos
-                    should_notify = True
-                    print(f"[PRIMEIRA_MSG] {shipment_id}: enviando primeira mensagem")
-                else:
-                    print(f"[PRIMEIRA_MSG] {shipment_id}: pulando - sem eventos válidos ainda")
+            # ⚠️ IMPORTANTE: NÃO enviar se for erro PARCEL_NOT_FOUND
+            if is_first_notify and not is_parcel_not_found:
+                should_notify = True
+                print(f"[PRIMEIRA_MSG] {shipment_id}: enviando primeira mensagem")
 
             if not existing_data:
                 print(f"[NOVO] Criando entrada para shipment {shipment_id}")
@@ -840,6 +867,101 @@ def consultar_shipments(db=None):
             
             # Timeout aleatório entre 0.75 e 2 segundos entre shipments
             time.sleep(random.uniform(1.9, 2.1))
+        
+        # ========== PROCESSAMENTO DA FILA DE RATE LIMIT ==========
+        # Retry shipments com rate limit até que não haja mais erros
+        if rate_limit_queue:
+            print(f"\n[RATE LIMIT QUEUE] Processando {len(rate_limit_queue)} shipments com rate limit...")
+            max_queue_retries = int(os.getenv('RATE_LIMIT_MAX_RETRIES', 10))
+            retry_round = 0
+            
+            while rate_limit_queue and retry_round < max_queue_retries:
+                retry_round += 1
+                print(f"[RATE LIMIT QUEUE] Rodada {retry_round}/{max_queue_retries} - {len(rate_limit_queue)} shipments na fila")
+                
+                # Pausar antes de retry para respeitar rate limit
+                sleep_time = random.uniform(15, 20)
+                print(f"[RATE LIMIT QUEUE] Aguardando {sleep_time:.1f}s antes de retentar...")
+                time.sleep(sleep_time)
+                
+                # Processar fila atual
+                current_queue = rate_limit_queue.copy()
+                rate_limit_queue.clear()
+                
+                for shipment in current_queue:
+                    shipment_id = shipment.get('id')
+                    codigo_rastreio = shipment.get('tracking')
+                    
+                    if not codigo_rastreio:
+                        continue
+                    
+                    print(f"[RATE LIMIT RETRY] Tentando novamente {codigo_rastreio}...")
+                    
+                    try:
+                        rastreio_detalhado = extrair_rastreio_api(codigo_rastreio)
+                        
+                        # Verificar se ainda tem rate limit
+                        if isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado:
+                            erro_txt = str(rastreio_detalhado['erro']).lower()
+                            if ('429' in erro_txt) or ('rate limit' in erro_txt):
+                                # Ainda com rate limit - voltar para fila
+                                rate_limit_queue.append(shipment)
+                                print(f"[RATE LIMIT RETRY] Ainda com rate limit: {codigo_rastreio}")
+                                continue
+                        
+                        # Sucesso ou outro erro - processar normalmente
+                        to_data = shipment.get('to', {})
+                        nome = to_data.get('name', '')
+                        telefone = to_data.get('phone', '')
+                        
+                        if not telefone:
+                            continue
+                        
+                        key = f"etiqueta:{shipment_id}".encode('utf-8')
+                        existing_data = db.get(key)
+                        
+                        old_data = {}
+                        if existing_data:
+                            try:
+                                old_data = json.loads(existing_data.decode('utf-8'))
+                            except:
+                                pass
+                        
+                        # Salvar dados atualizados
+                        merged = dict(old_data) if isinstance(old_data, dict) else {}
+                        merged['nome'] = nome
+                        merged['telefone'] = telefone
+                        if codigo_rastreio:
+                            merged['tracking'] = codigo_rastreio
+                        
+                        # Atualizar rastreio se válido
+                        if isinstance(rastreio_detalhado, dict) and 'erro' not in rastreio_detalhado:
+                            eventos = rastreio_detalhado.get('eventos', [])
+                            if eventos:
+                                merged['rastreio_detalhado'] = {
+                                    'codigo_original': rastreio_detalhado.get('codigo_original'),
+                                    'status_atual': rastreio_detalhado.get('status_atual'),
+                                    'ultimo_evento': eventos[0],
+                                    'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
+                                }
+                        
+                        db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
+                        print(f"[RATE LIMIT RETRY] Sucesso para {codigo_rastreio}")
+                        processed_count += 1
+                        
+                    except Exception as e:
+                        print(f"[RATE LIMIT RETRY] Erro ao processar {codigo_rastreio}: {e}")
+                        # Não readicionar à fila em caso de erro
+                    
+                    # Pequeno delay entre retries
+                    time.sleep(random.uniform(2, 3))
+                
+                if not rate_limit_queue:
+                    print(f"[RATE LIMIT QUEUE] ✅ Fila limpa após {retry_round} rodada(s)!")
+                    break
+            
+            if rate_limit_queue:
+                print(f"[RATE LIMIT QUEUE] ⚠️ Ainda restam {len(rate_limit_queue)} shipments com rate limit após {max_queue_retries} rodadas")
         
         # Limpar shipments que não existem mais
         removed_count = 0
