@@ -192,6 +192,28 @@ class MelhorRastreio:
                             country
                         }
                     }
+                    pudoEvents {
+                        pudoType
+                        trackingCode
+                        createdAt
+                        translatedEventId
+                        status
+                        title
+                        description
+                        from
+                        to
+                        location {
+                            zipcode
+                            address
+                            locality
+                            number
+                            complement
+                            city
+                            state
+                            country
+                        }
+                        additionalInfo
+                    }
                 }
             }
             """,
@@ -225,41 +247,51 @@ class MelhorRastreio:
     def _processar_dados(self, dados_brutos: Dict, codigo_original: str) -> Dict:
         """
         Processa dados brutos da API em formato estruturado
-        
+
+        NOVO: Agora processa tanto trackingEvents quanto pudoEvents (PUDO = Pick-Up Drop-Off)
+
         Args:
             dados_brutos (Dict): Dados brutos da API
             codigo_original (str): Código original consultado
-            
+
         Returns:
             Dict: Dados estruturados
         """
         if not dados_brutos:
             return self._resultado_vazio(codigo_original)
-        
+
         # Extrair informações do tracker
         trackers = dados_brutos.get('trackers', [])
-        eventos = dados_brutos.get('trackingEvents', [])
-        
+        tracking_events = dados_brutos.get('trackingEvents', [])
+        pudo_events = dados_brutos.get('pudoEvents', [])
+
         # Informações básicas
         info_basica = self._extrair_info_basica(trackers, codigo_original)
-        
-        # Processar eventos
-        eventos_processados = self._processar_eventos(eventos)
-        
+
+        # Processar eventos de rastreamento tradicionais
+        eventos_tracking = self._processar_eventos(tracking_events)
+
+        # Processar eventos PUDO (pontos de coleta/entrega)
+        eventos_pudo = self._processar_pudo_events(pudo_events)
+
+        # Mesclar todos os eventos e ordenar por data (mais recente primeiro)
+        todos_eventos = eventos_tracking + eventos_pudo
+        todos_eventos.sort(key=lambda e: e.get('data_registro') or '', reverse=True)
+
         # Determinar status atual
-        status_atual = self._determinar_status_atual(eventos_processados)
-        
+        status_atual = self._determinar_status_atual(todos_eventos)
+
         # Montar resultado final
         resultado = {
             **info_basica,
-            'total_eventos': len(eventos_processados),
+            'total_eventos': len(todos_eventos),
             'status_atual': status_atual,
-            'ultima_atualizacao': eventos_processados[0]['data_registro'] if eventos_processados else None,
-            'eventos': eventos_processados,
+            'ultima_atualizacao': todos_eventos[0]['data_registro'] if todos_eventos else None,
+            'eventos': todos_eventos,
             'consulta_realizada_em': datetime.now().isoformat(),
             'sucesso': True
         }
-        
+
         return resultado
     
     def _extrair_info_basica(self, trackers: List[Dict], codigo_original: str) -> Dict:
@@ -334,6 +366,60 @@ class MelhorRastreio:
             key=lambda x: x['data_registro'] or '',
             reverse=True
         )
+
+        return eventos_processados
+
+    def _processar_pudo_events(self, pudo_events: List[Dict]) -> List[Dict]:
+        """
+        Processa eventos PUDO (Pick-Up Drop-Off) - Pontos de coleta/entrega
+
+        PUDO events incluem eventos de serviços como Pegaki, onde o pacote
+        é postado/coletado em pontos específicos (ex: lojas, farmácias, etc.)
+
+        Args:
+            pudo_events (List[Dict]): Lista de eventos PUDO da API
+
+        Returns:
+            List[Dict]: Eventos PUDO processados no mesmo formato dos eventos normais
+        """
+        eventos_processados = []
+
+        for evento in pudo_events:
+            # Usar createdAt como data principal (pudoEvents não tem registeredAt)
+            data_criacao = evento.get('createdAt')
+
+            # Dados básicos do evento PUDO
+            evento_estruturado = {
+                'data_registro': data_criacao,  # Usar createdAt para compatibilidade
+                'data_criacao': data_criacao,
+                'data_notificacao': None,
+                'titulo': evento.get('title'),
+                'descricao': evento.get('description'),
+                'status_codigo': evento.get('status'),
+                'origem': evento.get('from'),
+                'destino': evento.get('to'),
+                'informacao_adicional': evento.get('additionalInfo'),
+                'observacoes': None,
+                'fonte': f"pudo:{evento.get('pudoType', 'unknown')}",  # Ex: "pudo:pegaki"
+                'tipo_tracker': evento.get('pudoType'),
+                'translated_event_id': evento.get('translatedEventId'),
+                'localizacao': self._processar_localizacao(evento.get('location')),
+                'rota': self._formatar_rota(evento.get('from'), evento.get('to')),
+                'pudo_tracking_code': evento.get('trackingCode')  # Código específico do PUDO
+            }
+
+            # Enriquecer com tradução completa
+            if self.carregar_traducoes and evento.get('translatedEventId'):
+                traducao = self._obter_traducao(evento['translatedEventId'])
+                if traducao:
+                    evento_estruturado.update({
+                        'titulo_completo': traducao.get('title'),
+                        'descricao_completa': traducao.get('description'),
+                        'flag': traducao.get('flag'),
+                        'status_traducao': traducao.get('status')
+                    })
+
+            eventos_processados.append(evento_estruturado)
 
         return eventos_processados
 
