@@ -14,6 +14,10 @@ from app.tracking import rastrear, MelhorRastreioException
 import time
 import random
 from zoneinfo import ZoneInfo
+from app.logger import get_logger, get_cronjob_logger, log_execution_time
+
+# Logger principal do módulo
+logger = get_logger(__name__)
 
 # Cache simples para template de WhatsApp (evita ler o DB a cada chamada)
 _WHATSAPP_TEMPLATE_CACHE = {
@@ -589,105 +593,145 @@ def consultar_shipments(db=None):
     - Retenta até que não haja mais erros de rate limit
     - PARCEL_NOT_FOUND não envia mensagem ao cliente
     """
-    if db is None:
-        db = rocksdbpy.open('database.db', rocksdbpy.Option())
+    # Logger específico para este cronjob
+    cron_logger = get_cronjob_logger('monitor_shipments')
+    cron_logger.info("=" * 80)
+    cron_logger.info("INICIANDO CONSULTA DE SHIPMENTS - Monitoramento de Rastreio")
+    cron_logger.info("=" * 80)
     
-    token = db.get(b"token:melhor_envio")
-    if not token:   
-        raise HTTPException(status_code=401, detail="Token do Melhor Envio não encontrado.")
-    token = token.decode('utf-8')
-
-    status = 'posted'
-    response = requests.get("https://melhorenvio.com.br/api/v2/me/orders", headers={
-        'Authorization': f'Bearer {token}'
-    }, params={
-        'status': status,
-        'page': 1})
-    shipments = []
-
-    if response.status_code == 200:
-        corrent_page = response.json().get('current_page')
-        shipments.extend(response.json().get('data', []))
-        status_code = response.status_code
+    try:
+        if db is None:
+            db = rocksdbpy.open('database.db', rocksdbpy.Option())
+            cron_logger.debug("Banco de dados RocksDB aberto")
         
-        # Buscar todas as páginas
-        while status_code == 200:
+        token = db.get(b"token:melhor_envio")
+        if not token:
+            cron_logger.error("Token do Melhor Envio não encontrado no banco de dados")
+            raise HTTPException(status_code=401, detail="Token do Melhor Envio não encontrado.")
+        token = token.decode('utf-8')
+        cron_logger.debug("Token do Melhor Envio recuperado com sucesso")
+
+        status = 'posted'
+        cron_logger.info(f"Consultando API Melhor Envio - Status: {status}")
+        
+        try:
             response = requests.get("https://melhorenvio.com.br/api/v2/me/orders", headers={
                 'Authorization': f'Bearer {token}'
             }, params={
                 'status': status,
-                'page': corrent_page + 1})
-            if response.status_code == 200:
-                corrent_page = response.json().get('current_page')
-                shipments.extend(response.json().get('data', []))
-            else:
-                status_code = response.status_code
+                'page': 1}, timeout=30)
+        except requests.exceptions.Timeout as e:
+            cron_logger.error(f"Timeout ao consultar API Melhor Envio: {e}")
+            raise
+        except requests.exceptions.RequestException as e:
+            cron_logger.error(f"Erro de rede ao consultar API Melhor Envio: {e}", exc_info=True)
+            raise
         
-        processed_count = 0
-        notifications_sent = 0
-        current_shipment_ids = set()
-        
-        # Fila para retries de rate limit - processados ao final
-        rate_limit_queue = []
-        
-        for shipment in shipments:
-            shipment_id = shipment.get('id')
-            if not shipment_id:
-                continue
-                
-            # Manter registro dos IDs atuais
-            current_shipment_ids.add(shipment_id)
-                
-            # Extrair dados necessários
-            to_data = shipment.get('to', {})
-            nome = to_data.get('name', '')
-            telefone = to_data.get('phone', '')
+        shipments = []
+
+        if response.status_code == 200:
+            corrent_page = response.json().get('current_page')
+            shipments.extend(response.json().get('data', []))
+            status_code = response.status_code
+            cron_logger.info(f"Página 1 carregada: {len(shipments)} shipments encontrados")
             
-            if not telefone:
-                print(f"Shipment {shipment_id} sem telefone do destinatário")
-                continue
+            # Buscar todas as páginas
+            page_count = 1
+            while status_code == 200:
+                page_count += 1
+                try:
+                    response = requests.get("https://melhorenvio.com.br/api/v2/me/orders", headers={
+                        'Authorization': f'Bearer {token}'
+                    }, params={
+                        'status': status,
+                        'page': corrent_page + 1}, timeout=30)
+                except requests.exceptions.RequestException as e:
+                    cron_logger.warning(f"Erro ao buscar página {page_count}: {e}")
+                    break
+                    
+                if response.status_code == 200:
+                    corrent_page = response.json().get('current_page')
+                    page_data = response.json().get('data', [])
+                    shipments.extend(page_data)
+                    cron_logger.debug(f"Página {page_count} carregada: {len(page_data)} shipments")
+                else:
+                    status_code = response.status_code
+                    cron_logger.debug(f"Última página alcançada: {page_count - 1}")
             
-            # Obter rastreamento atual usando API com retries controlados.
-            # Estratégia:
-            # - Retentar para casos transitórios: HTTP 429 (rate limit), timeouts, e erros conhecidos como PARCEL_NOT_FOUND
-            # - Pausar um pouco entre tentativas (backoff simples)
-            # - Não enviar notificação caso a extração não retorne eventos válidos (já tratado mais adiante)
-            codigo_rastreio = shipment.get('tracking')  # Código da transportadora (pode demorar para aparecer)
-            codigo_self_tracking = shipment.get('self_tracking')  # Código próprio do Melhor Envio (disponível imediatamente)
-            if codigo_rastreio:
-                max_retries = int(os.getenv('WEBHOOKS_MAX_RETRIES', 3))
-                rastreio_detalhado = None
-                has_rate_limit = False
+            cron_logger.info(f"Total de shipments carregados: {len(shipments)} em {page_count} página(s)")
+            
+            processed_count = 0
+            notifications_sent = 0
+            current_shipment_ids = set()
+            
+            # Fila para retries de rate limit - processados ao final
+            rate_limit_queue = []
+            
+            for idx, shipment in enumerate(shipments, 1):
+                shipment_id = shipment.get('id')
+                if not shipment_id:
+                    cron_logger.warning(f"Shipment #{idx} sem ID, pulando")
+                    continue
+                    
+                cron_logger.debug(f"[{idx}/{len(shipments)}] Processando shipment {shipment_id}")
                 
-                for attempt in range(1, max_retries + 1):
-                    try:
-                        rastreio_detalhado = extrair_rastreio_api(codigo_rastreio)
-                    except Exception as e:
-                        # Normalizar para dict com 'erro' para facilitar análise
-                        rastreio_detalhado = {"erro": f"Erro ao extrair rastreio: {e}"}
+                # Manter registro dos IDs atuais
+                current_shipment_ids.add(shipment_id)
+                    
+                # Extrair dados necessários
+                to_data = shipment.get('to', {})
+                nome = to_data.get('name', '')
+                telefone = to_data.get('phone', '')
+                
+                if not telefone:
+                    cron_logger.warning(f"Shipment {shipment_id} sem telefone do destinatário")
+                    continue
+                
+                # Obter rastreamento atual usando API com retries controlados.
+                # Estratégia:
+                # - Retentar para casos transitórios: HTTP 429 (rate limit), timeouts, e erros conhecidos como PARCEL_NOT_FOUND
+                # - Pausar um pouco entre tentativas (backoff simples)
+                # - Não enviar notificação caso a extração não retorne eventos válidos (já tratado mais adiante)
+                codigo_rastreio = shipment.get('tracking')  # Código da transportadora (pode demorar para aparecer)
+                codigo_self_tracking = shipment.get('self_tracking')  # Código próprio do Melhor Envio (disponível imediatamente)
+                if codigo_rastreio:
+                    cron_logger.debug(f"Shipment {shipment_id} tem código de rastreio: {codigo_rastreio}")
+                    max_retries = int(os.getenv('WEBHOOKS_MAX_RETRIES', 3))
+                    rastreio_detalhado = None
+                    has_rate_limit = False
+                    
+                    for attempt in range(1, max_retries + 1):
+                        try:
+                            cron_logger.debug(f"Tentativa {attempt}/{max_retries} de extrair rastreio para {codigo_rastreio}")
+                            rastreio_detalhado = extrair_rastreio_api(codigo_rastreio)
+                        except Exception as e:
+                            # Normalizar para dict com 'erro' para facilitar análise
+                            cron_logger.error(f"Exceção ao extrair rastreio {codigo_rastreio}: {e}", exc_info=True)
+                            rastreio_detalhado = {"erro": f"Erro ao extrair rastreio: {e}"}
 
-                    # Se veio um dict sem 'erro' e com eventos, considerar sucesso imediato
-                    if isinstance(rastreio_detalhado, dict) and 'erro' not in rastreio_detalhado and rastreio_detalhado.get('eventos'):
-                        break
+                        # Se veio um dict sem 'erro' e com eventos, considerar sucesso imediato
+                        if isinstance(rastreio_detalhado, dict) and 'erro' not in rastreio_detalhado and rastreio_detalhado.get('eventos'):
+                            cron_logger.debug(f"Rastreio extraído com sucesso para {codigo_rastreio}: {len(rastreio_detalhado.get('eventos', []))} eventos")
+                            break
 
-                    # Inspecionar texto do erro para decidir retry
-                    try:
-                        txt = json.dumps(rastreio_detalhado)
-                    except Exception:
-                        txt = str(rastreio_detalhado)
-                    txt_low = txt.lower()
+                        # Inspecionar texto do erro para decidir retry
+                        try:
+                            txt = json.dumps(rastreio_detalhado)
+                        except Exception:
+                            txt = str(rastreio_detalhado)
+                        txt_low = txt.lower()
 
-                    # Rate limit (429) - marcar para fila de retry
-                    if ('429' in txt_low) or ('rate limit' in txt_low):
-                        if attempt < max_retries:
-                            sleep_time = random.uniform(10, 12)
-                            print(f"[RATE LIMIT] Pausando por {sleep_time:.2f}s devido a 429 para {codigo_rastreio} (tentativa {attempt}/{max_retries})")
-                            time.sleep(sleep_time)
-                            continue
-                        else:
-                            # Máximo de tentativas atingido - adicionar à fila para retry posterior
-                            print(f"[RATE LIMIT] Adicionando {codigo_rastreio} à fila de retry")
-                            has_rate_limit = True
+                        # Rate limit (429) - marcar para fila de retry
+                        if ('429' in txt_low) or ('rate limit' in txt_low):
+                            if attempt < max_retries:
+                                sleep_time = random.uniform(10, 12)
+                                cron_logger.warning(f"[RATE LIMIT] Pausando por {sleep_time:.2f}s devido a 429 para {codigo_rastreio} (tentativa {attempt}/{max_retries})")
+                                time.sleep(sleep_time)
+                                continue
+                            else:
+                                # Máximo de tentativas atingido - adicionar à fila para retry posterior
+                                cron_logger.warning(f"[RATE LIMIT] Adicionando {codigo_rastreio} à fila de retry")
+                                has_rate_limit = True
                             break
 
                     # Timeout - retry
@@ -803,57 +847,61 @@ def consultar_shipments(db=None):
                 else:
                     print(f"[PRIMEIRA_MSG] {shipment_id}: pulando - sem eventos válidos ainda")
 
-            if not existing_data:
-                print(f"[NOVO] Criando entrada para shipment {shipment_id}")
+                if not existing_data:
+                    cron_logger.info(f"[NOVO] Criando entrada para shipment {shipment_id}")
 
-            # Montar objeto a gravar: mesclar campos, garantir que 'tracking' seja salvo sempre que disponível
-            merged = dict(old_data) if isinstance(old_data, dict) else {}
-            merged['nome'] = nome
-            merged['telefone'] = telefone
-            # Salvar o código de rastreio do próprio objeto (tracking) sempre que presente
-            if codigo_rastreio:
-                merged['tracking'] = codigo_rastreio
-            # Salvar também o self_tracking (código próprio do Melhor Envio)
-            if codigo_self_tracking:
-                merged['self_tracking'] = codigo_self_tracking
+                # Montar objeto a gravar: mesclar campos, garantir que 'tracking' seja salvo sempre que disponível
+                merged = dict(old_data) if isinstance(old_data, dict) else {}
+                merged['nome'] = nome
+                merged['telefone'] = telefone
+                # Salvar o código de rastreio do próprio objeto (tracking) sempre que presente
+                if codigo_rastreio:
+                    merged['tracking'] = codigo_rastreio
+                # Salvar também o self_tracking (código próprio do Melhor Envio)
+                if codigo_self_tracking:
+                    merged['self_tracking'] = codigo_self_tracking
 
-            # Só atualizar rastreio_detalhado quando for uma extração válida
-            if not is_error_rastreio:
-                eventos = rastreio_detalhado.get('eventos', [])
-                if eventos:
-                    ultimo_evento = eventos[0]  # Assumindo que o primeiro é o mais recente
-                    merged['rastreio_detalhado'] = {
-                        'codigo_original': rastreio_detalhado.get('codigo_original'),
-                        'status_atual': rastreio_detalhado.get('status_atual'),
-                        'ultimo_evento': ultimo_evento,
-                        'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
-                    }
-                else:
-                    merged['rastreio_detalhado'] = rastreio_detalhado
+                # Só atualizar rastreio_detalhado quando for uma extração válida
+                if not is_error_rastreio:
+                    eventos = rastreio_detalhado.get('eventos', [])
+                    if eventos:
+                        ultimo_evento = eventos[0]  # Assumindo que o primeiro é o mais recente
+                        merged['rastreio_detalhado'] = {
+                            'codigo_original': rastreio_detalhado.get('codigo_original'),
+                            'status_atual': rastreio_detalhado.get('status_atual'),
+                            'ultimo_evento': ultimo_evento,
+                            'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
+                        }
+                        cron_logger.debug(f"Rastreio atualizado para {shipment_id}: {rastreio_detalhado.get('status_atual')}")
+                    else:
+                        merged['rastreio_detalhado'] = rastreio_detalhado
+                        cron_logger.debug(f"Rastreio sem eventos para {shipment_id}")
 
-            # Gravar merged no banco
-            try:
-                db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
-            except Exception as e:
-                print(f"Erro ao gravar dados para {shipment_id}: {e}")
-
-            # Se houve erro, registrar last_error
-            if is_error_rastreio:
-                print(f"[IGNORADO] Não atualizou rastreio_detalhado para {shipment_id} devido a erro: {rastreio_detalhado}")
+                # Gravar merged no banco
                 try:
-                    last_error_key = f"etiqueta:{shipment_id}:last_error".encode('utf-8')
-                    last_error_value = json.dumps({
-                        "error": rastreio_detalhado,
-                        "timestamp": datetime.now().isoformat()
-                    }, ensure_ascii=False).encode('utf-8')
-                    db.set(last_error_key, last_error_value)
+                    db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
                 except Exception as e:
-                    print(f"Erro ao gravar last_error para {shipment_id}: {e}")
-            
-            # Enviar notificação se necessário
-            if should_notify:
-                try:
-                    mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
+                    cron_logger.error(f"Erro ao gravar dados para {shipment_id}: {e}", exc_info=True)
+
+                # Se houve erro, registrar last_error
+                if is_error_rastreio:
+                    cron_logger.warning(f"[IGNORADO] Não atualizou rastreio_detalhado para {shipment_id} devido a erro")
+                    cron_logger.debug(f"Erro detalhado: {rastreio_detalhado}")
+                    try:
+                        last_error_key = f"etiqueta:{shipment_id}:last_error".encode('utf-8')
+                        last_error_value = json.dumps({
+                            "error": rastreio_detalhado,
+                            "timestamp": datetime.now().isoformat()
+                        }, ensure_ascii=False).encode('utf-8')
+                        db.set(last_error_key, last_error_value)
+                    except Exception as e:
+                        cron_logger.error(f"Erro ao gravar last_error para {shipment_id}: {e}")
+                
+                # Enviar notificação se necessário
+                if should_notify:
+                    try:
+                        mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
+                        cron_logger.info(f"[NOTIFICAÇÃO] Enviando WhatsApp para {telefone} (shipment {shipment_id})")
                     #enviar_para_whatsapp(mensagem, telefone)
                     enviar_para_whatsapp(mensagem, telefone)
                     notifications_sent += 1
@@ -1007,18 +1055,25 @@ def consultar_shipments(db=None):
                     except:
                         pass  # Chave não existe, ignorar
                     
-                    print(f"[REMOVIDO] Shipment {shipment_id_in_db} não encontrado na API, removido do banco")
+                    cron_logger.info(f"[REMOVIDO] Shipment {shipment_id_in_db} não encontrado na API, removido do banco")
                 except Exception as e:
-                    print(f"Erro ao remover chave {key}: {e}")
+                    cron_logger.error(f"Erro ao remover chave {key}: {e}")
                     
         except Exception as e:
-            print(f"Erro ao limpar shipments antigos: {e}")
+            cron_logger.error(f"Erro ao limpar shipments antigos: {e}", exc_info=True)
         
-        print(f"[RESUMO] Processados: {processed_count} shipments, Notificações enviadas: {notifications_sent}, Removidos: {removed_count}")
+        cron_logger.info("=" * 80)
+        cron_logger.info(f"[RESUMO] Processados: {processed_count} | Notificações: {notifications_sent} | Removidos: {removed_count}")
+        cron_logger.info("=" * 80)
         
     else:
+        cron_logger.error(f"Erro ao consultar API Melhor Envio: HTTP {response.status_code}")
+        cron_logger.error(f"Detalhes: {response.text}")
         raise HTTPException(status_code=response.status_code, detail=response.text)
-
+    
+    except Exception as e:
+        cron_logger.error(f"❌ ERRO CRÍTICO ao consultar shipments: {e}", exc_info=True)
+        raise
 
 async def consultar_shipments_async(db=None):
     """Wrapper async para consultar_shipments que executa a função síncrona em um executor (thread).

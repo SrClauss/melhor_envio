@@ -9,3 +9,7 @@ services:
       - /opt/melhor_envio/database.db:/app/database.db:rw
       # Volume de backups (para scripts de backup)
       - /opt/melhor_envio/backups:/app/backups:rw
+      # Volume de logs (para persistência de logs)
+      - /opt/melhor_envio/logs:/app/logs:rw
+    environment:
+      - LOG_LEVEL=INFO

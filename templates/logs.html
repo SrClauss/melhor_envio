@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logs do Sistema - Melhor Envio</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .logs-container {
+            max-width: 1400px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        
+        .log-file-selector {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .log-file-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .log-file-item {
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border: 2px solid #dee2e6;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .log-file-item:hover {
+            border-color: #007bff;
+            background: #e7f1ff;
+        }
+        
+        .log-file-item.active {
+            border-color: #007bff;
+            background: #cfe2ff;
+        }
+        
+        .log-viewer {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            max-height: 600px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        
+        .log-line {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            padding: 2px 0;
+        }
+        
+        .log-line.ERROR {
+            color: #f48771;
+            font-weight: bold;
+        }
+        
+        .log-line.WARNING {
+            color: #dcdcaa;
+        }
+        
+        .log-line.INFO {
+            color: #4ec9b0;
+        }
+        
+        .log-line.DEBUG {
+            color: #9cdcfe;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .controls select,
+        .controls input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .controls button {
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .controls button:hover {
+            background: #0056b3;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        
+        .header-stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 15px;
+        }
+        
+        .stat-card {
+            background: #e7f1ff;
+            padding: 10px 15px;
+            border-radius: 6px;
+            flex: 1;
+        }
+        
+        .stat-card strong {
+            display: block;
+            color: #0056b3;
+            font-size: 24px;
+        }
+        
+        .stat-card span {
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="logs-container">
+        <h1>📊 Logs do Sistema</h1>
+        
+        <div class="log-file-selector">
+            <h2>Arquivos de Log Disponíveis</h2>
+            <div class="header-stats">
+                <div class="stat-card">
+                    <strong id="total-files">{{ log_files|length }}</strong>
+                    <span>Arquivos de log</span>
+                </div>
+                <div class="stat-card">
+                    <strong id="selected-size">-</strong>
+                    <span>Tamanho do arquivo</span>
+                </div>
+                <div class="stat-card">
+                    <strong id="log-count">0</strong>
+                    <span>Linhas carregadas</span>
+                </div>
+            </div>
+            
+            <div class="log-file-list">
+                {% for file in log_files %}
+                <div class="log-file-item" data-filename="{{ file.name }}" data-size="{{ file.size_mb }}">
+                    <strong>{{ file.name }}</strong>
+                    <div style="font-size: 12px; color: #666; margin-top: 5px;">
+                        {{ file.size_mb }} MB
+                    </div>
+                    <div style="font-size: 11px; color: #999; margin-top: 3px;">
+                        Modificado: {{ file.modified[:16] }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <div class="controls">
+                <label>
+                    Filtro de nível:
+                    <select id="level-filter">
+                        <option value="">Todos</option>
+                        <option value="ERROR">ERROR</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="INFO">INFO</option>
+                        <option value="DEBUG">DEBUG</option>
+                    </select>
+                </label>
+                
+                <label>
+                    Linhas:
+                    <input type="number" id="lines-count" value="200" min="10" max="5000" step="10">
+                </label>
+                
+                <button id="refresh-btn" onclick="loadCurrentLog()">🔄 Atualizar</button>
+                <button onclick="window.location.href='/dashboard'">← Voltar ao Dashboard</button>
+            </div>
+        </div>
+        
+        <div id="log-content">
+            <div class="loading">
+                Selecione um arquivo de log acima para visualizar
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentFile = null;
+        
+        // Adicionar listeners aos itens de arquivo
+        document.querySelectorAll('.log-file-item').forEach(item => {
+            item.addEventListener('click', function() {
+                // Remover active de todos
+                document.querySelectorAll('.log-file-item').forEach(i => i.classList.remove('active'));
+                
+                // Adicionar active ao clicado
+                this.classList.add('active');
+                
+                // Atualizar stats
+                document.getElementById('selected-size').textContent = this.dataset.size + ' MB';
+                
+                // Carregar log
+                currentFile = this.dataset.filename;
+                loadLog(currentFile);
+            });
+        });
+        
+        // Função para carregar log
+        async function loadLog(filename) {
+            const level = document.getElementById('level-filter').value;
+            const lines = document.getElementById('lines-count').value;
+            
+            const logContent = document.getElementById('log-content');
+            logContent.innerHTML = '<div class="loading">Carregando...</div>';
+            
+            try {
+                const url = `/api/logs/${filename}?lines=${lines}${level ? '&level=' + level : ''}`;
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.lines && data.lines.length > 0) {
+                    const logViewer = document.createElement('div');
+                    logViewer.className = 'log-viewer';
+                    
+                    data.lines.forEach(line => {
+                        const lineDiv = document.createElement('div');
+                        lineDiv.className = 'log-line';
+                        
+                        // Detectar nível do log na linha
+                        if (line.includes('| ERROR')) {
+                            lineDiv.classList.add('ERROR');
+                        } else if (line.includes('| WARNING')) {
+                            lineDiv.classList.add('WARNING');
+                        } else if (line.includes('| INFO')) {
+                            lineDiv.classList.add('INFO');
+                        } else if (line.includes('| DEBUG')) {
+                            lineDiv.classList.add('DEBUG');
+                        }
+                        
+                        lineDiv.textContent = line;
+                        logViewer.appendChild(lineDiv);
+                    });
+                    
+                    logContent.innerHTML = '';
+                    logContent.appendChild(logViewer);
+                    
+                    // Atualizar contador
+                    document.getElementById('log-count').textContent = data.total_lines;
+                    
+                    // Auto-scroll para o final
+                    logViewer.scrollTop = logViewer.scrollHeight;
+                } else {
+                    logContent.innerHTML = '<div class="loading">Nenhuma linha encontrada com os filtros atuais</div>';
+                }
+            } catch (error) {
+                logContent.innerHTML = `<div class="error">Erro ao carregar log: ${error.message}</div>`;
+            }
+        }
+        
+        // Função para recarregar log atual
+        function loadCurrentLog() {
+            if (currentFile) {
+                loadLog(currentFile);
+            }
+        }
+        
+        // Auto-refresh a cada 10 segundos (opcional)
+        // setInterval(() => {
+        //     if (currentFile) {
+        //         loadLog(currentFile);
+        //     }
+        // }, 10000);
+    </script>
+</body>
+</html>
