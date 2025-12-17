@@ -895,3 +895,38 @@ async def get_cronjobs_health(request: Request):
             "jobs": [],
             "total_jobs": 0
         }
+
+
+@router.post("/force_run_main_cron")
+async def force_run_main_cron(request: Request):
+    """
+    Força a execução imediata do cronjob principal de monitoramento.
+    Pausa o cronjob de boas-vindas por 20 minutos para evitar colisões.
+    
+    Returns:
+        JSON com resultado da execução
+    """
+    from app.webhooks import forcar_execucao_cron_principal
+    
+    # Autenticação
+    try:
+        get_current_user(request)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    
+    try:
+        db = request.app.state.db
+        result = await forcar_execucao_cron_principal(db)
+        
+        if result.get("success"):
+            return JSONResponse(content=result, status_code=200)
+        else:
+            return JSONResponse(content=result, status_code=500)
+    except Exception as e:
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": f"Erro ao forçar execução: {str(e)}"
+            },
+            status_code=500
+        )

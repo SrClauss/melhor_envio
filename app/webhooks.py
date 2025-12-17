@@ -141,6 +141,9 @@ MinutesInterval = Literal[2, 10, 15, 20, 30, 45, 60, 120, 180, 240]
 # Scheduler global para monitoramento
 scheduler = None
 
+# Controle de pausa do cronjob de boas-vindas (usado quando forçar cron principal)
+_welcome_cron_paused_until = None
+
 # Timezone de exibição (Brasília) e UTC para scheduler/storage
 TZ_DISPLAY = ZoneInfo('America/Sao_Paulo')  # Para exibição e input do usuário
 TZ_UTC = ZoneInfo('UTC')  # Para o scheduler e storage no banco
@@ -732,29 +735,29 @@ def consultar_shipments(db=None):
                                 # Máximo de tentativas atingido - adicionar à fila para retry posterior
                                 cron_logger.warning(f"[RATE LIMIT] Adicionando {codigo_rastreio} à fila de retry")
                                 has_rate_limit = True
+                                break
+
+                        # Timeout - retry
+                        if ('timeout' in txt_low) or ('timed out' in txt_low):
+                            if attempt < max_retries:
+                                sleep_time = random.uniform(1, 3)
+                                cron_logger.warning(f"[RETRY] Pausando por {sleep_time:.2f}s antes de nova tentativa para {codigo_rastreio} (tentativa {attempt}/{max_retries})")
+                                time.sleep(sleep_time)
+                                continue
+                            else:
+                                cron_logger.warning(f"[RETRY] Máximo de tentativas atingido para {codigo_rastreio}")
+                                break
+
+                        # PARCEL_NOT_FOUND - não fazer retry, será filtrado depois
+                        # (não envia mensagem para cliente)
+                        if ('parcel_not_found' in txt_low) or ('parcel not' in txt_low) or ('not found' in txt_low):
+                            cron_logger.debug(f"[PARCEL_NOT_FOUND] Rastreio ainda não disponível para {codigo_rastreio}")
                             break
 
-                    # Timeout - retry
-                    if ('timeout' in txt_low) or ('timed out' in txt_low):
-                        if attempt < max_retries:
-                            sleep_time = random.uniform(1, 3)
-                            print(f"[RETRY] Pausando por {sleep_time:.2f}s antes de nova tentativa para {codigo_rastreio} (tentativa {attempt}/{max_retries})")
-                            time.sleep(sleep_time)
-                            continue
-                        else:
-                            print(f"[RETRY] Máximo de tentativas atingido para {codigo_rastreio}")
-                            break
-
-                    # PARCEL_NOT_FOUND - não fazer retry, será filtrado depois
-                    # (não envia mensagem para cliente)
-                    if ('parcel_not_found' in txt_low) or ('parcel not' in txt_low) or ('not found' in txt_low):
-                        print(f"[PARCEL_NOT_FOUND] Rastreio ainda não disponível para {codigo_rastreio}")
+                        # Caso não seja um erro identificável para retry, sair
                         break
-
-                    # Caso não seja um erro identificável para retry, sair
-                    break
-                
-                # Se tem rate limit, adicionar à fila para processar depois
+                    
+                    # Se tem rate limit, adicionar à fila para processar depois
                 if has_rate_limit:
                     rate_limit_queue.append(shipment)
                     continue
@@ -1970,6 +1973,11 @@ def iniciar_cronjob_boas_vindas(db=None):
         print(f"[WELCOME_CRON] ⏰ Job disparado em {_fmt_local(now_utc)} (Brasília: {now_brasilia.strftime('%H:%M')})")
         print(f"[WELCOME_CRON] Range permitido: {start_h_brt:02d}:00 - {end_h_brt:02d}:00 (Brasília)")
 
+        # 0. Verificar se está temporariamente pausado (execução forçada do cron principal)
+        if is_welcome_cron_paused():
+            print(f"[WELCOME_CRON] ⏸️  PAUSADO: Cronjob pausado temporariamente (execução forçada do principal)")
+            return
+
         # 1. Verificar se está dentro do horário permitido
         if not (start_h_brt <= hour_brasilia < end_h_brt):
             print(f"[WELCOME_CRON] ⏭️  PULANDO: Hora atual {hour_brasilia:02d}:xx fora do range {start_h_brt:02d}:00-{end_h_brt:02d}:00")
@@ -2038,6 +2046,73 @@ def parar_cronjob_boas_vindas():
             print("[WELCOME_CRON] Nenhum job de boas-vindas para remover")
     except Exception as e:
         print(f"[WELCOME_CRON] Erro ao parar cronjob: {e}")
+
+
+def pausar_welcome_cron_temporariamente(minutos: int = 20):
+    """
+    Pausa temporariamente o cronjob de boas-vindas.
+    
+    Args:
+        minutos: Tempo em minutos para pausar o cronjob
+    """
+    global _welcome_cron_paused_until
+    _welcome_cron_paused_until = datetime.now(TZ_UTC) + timedelta(minutes=minutos)
+    logger.info(f"[WELCOME_CRON] Pausado temporariamente até {_welcome_cron_paused_until.isoformat()}")
+    return _welcome_cron_paused_until
+
+
+def is_welcome_cron_paused() -> bool:
+    """Verifica se o cronjob de boas-vindas está pausado."""
+    global _welcome_cron_paused_until
+    if _welcome_cron_paused_until is None:
+        return False
+    
+    now = datetime.now(TZ_UTC)
+    if now < _welcome_cron_paused_until:
+        return True
+    else:
+        # Pausa expirou, limpar
+        _welcome_cron_paused_until = None
+        return False
+
+
+async def forcar_execucao_cron_principal(db=None):
+    """
+    Força a execução imediata do cronjob principal de monitoramento.
+    Pausa o cronjob de boas-vindas por 20 minutos para evitar colisões.
+    
+    Returns:
+        Dict com resultado da execução
+    """
+    cron_logger = get_cronjob_logger('monitor_shipments')
+    cron_logger.info("=" * 80)
+    cron_logger.info("EXECUÇÃO FORÇADA DO CRONJOB PRINCIPAL")
+    cron_logger.info("=" * 80)
+    
+    try:
+        # Pausar cronjob de boas-vindas
+        paused_until = pausar_welcome_cron_temporariamente(20)
+        cron_logger.info(f"Cronjob de boas-vindas pausado até {paused_until.isoformat()}")
+        
+        # Executar consulta de shipments
+        cron_logger.info("Iniciando consulta forçada de shipments...")
+        await consultar_shipments_async(db)
+        
+        cron_logger.info("=" * 80)
+        cron_logger.info("EXECUÇÃO FORÇADA CONCLUÍDA COM SUCESSO")
+        cron_logger.info("=" * 80)
+        
+        return {
+            "success": True,
+            "message": "Cronjob principal executado com sucesso",
+            "welcome_cron_paused_until": paused_until.isoformat()
+        }
+    except Exception as e:
+        cron_logger.error(f"Erro ao executar cronjob forçado: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 
