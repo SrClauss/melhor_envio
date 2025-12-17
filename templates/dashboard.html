@@ -43,6 +43,18 @@
                         <h5 class="card-title mb-0">Configurações de Monitoramento</h5>
                     </div>
                     <div class="card-body">
+                        <!-- Botão para forçar execução do cron -->
+                        <div class="alert alert-info mb-3">
+                            <h6 class="alert-heading">
+                                <i class="bi bi-lightning-charge-fill"></i> Execução Manual
+                            </h6>
+                            <p class="mb-2">Force a execução imediata do monitoramento de rastreio. O cronjob de boas-vindas será pausado por 20 minutos.</p>
+                            <button type="button" class="btn btn-warning" id="forceCronBtn" onclick="forceCronExecution()">
+                                <i class="bi bi-play-circle-fill"></i> Forçar Execução Agora
+                            </button>
+                            <span id="forceCronStatus" class="ms-2"></span>
+                        </div>
+                        <hr>
                         <form id="intervalForm" method="post" action="/api/config/interval_minutes">
                             <div class="row">
                                 <div class="col-md-6">
@@ -81,6 +93,52 @@
 </div>
 
 <script>
+// Função para forçar execução do cron principal
+function forceCronExecution() {
+    const btn = document.getElementById('forceCronBtn');
+    const status = document.getElementById('forceCronStatus');
+    
+    // Desabilitar botão e mostrar carregando
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Executando...';
+    status.innerHTML = '<span class="text-muted">Iniciando execução forçada...</span>';
+    
+    fetch('/api/force_run_main_cron', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            status.innerHTML = '<span class="text-success">✅ Execução concluída com sucesso!</span>';
+            
+            // Mostrar detalhes
+            if (data.welcome_cron_paused_until) {
+                const pausedDate = new Date(data.welcome_cron_paused_until);
+                status.innerHTML += `<br><small class="text-muted">Cronjob de boas-vindas pausado até ${pausedDate.toLocaleString('pt-BR')}</small>`;
+            }
+            
+            // Reabilitar botão após 5 segundos
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Forçar Execução Agora';
+            }, 5000);
+        } else {
+            status.innerHTML = `<span class="text-danger">❌ Erro: ${data.error}</span>`;
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Forçar Execução Agora';
+        }
+    })
+    .catch(error => {
+        console.error('Erro ao forçar execução:', error);
+        status.innerHTML = `<span class="text-danger">❌ Erro de comunicação: ${error.message}</span>`;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-circle-fill"></i> Forçar Execução Agora';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Carregar o valor atual do intervalo
     fetch('/api/config/interval_minutes')

@@ -20,6 +20,10 @@ import requests
 import json
 from datetime import datetime
 from typing import Dict, List, Optional, Union
+from app.logger import get_logger
+
+# Logger para este módulo
+logger = get_logger(__name__)
 
 
 class MelhorRastreioException(Exception):
@@ -85,18 +89,29 @@ class MelhorRastreio:
             >>> print(resultado['eventos'][0]['descricao_completa'])
             'Seu pacote acabou de sair da unidade e em breve será entregue ao destinatário'
         """
+        logger.debug(f"Iniciando rastreamento para código: {codigo}")
         try:
             # Fazer consulta GraphQL
             dados_brutos = self._consultar_graphql(codigo)
 
             # Processar e estruturar dados
             dados_estruturados = self._processar_dados(dados_brutos, codigo)
-
+            
+            logger.debug(f"Rastreamento concluído para {codigo}: {len(dados_estruturados.get('eventos', []))} eventos")
             return dados_estruturados
 
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout ao rastrear {codigo}: {e}")
+            raise MelhorRastreioException(f"Timeout na requisição: {e}")
         except requests.exceptions.RequestException as e:
+            logger.error(f"Erro de rede ao rastrear {codigo}: {e}")
             raise MelhorRastreioException(f"Erro de rede: {e}")
+        except MelhorRastreioException as e:
+            # Já é uma exceção tratada, apenas propagar
+            logger.warning(f"Erro conhecido ao rastrear {codigo}: {e}")
+            raise
         except Exception as e:
+            logger.error(f"Erro inesperado ao rastrear {codigo}: {e}", exc_info=True)
             raise MelhorRastreioException(f"Erro inesperado: {e}")
 
     def _carregar_eventos_traduzidos(self) -> None:
@@ -232,14 +247,26 @@ class MelhorRastreio:
             }
         }
 
-        response = requests.post(
-            self.api_url,
-            headers=self.headers,
-            json=query,
-            timeout=self.timeout
-        )
+        logger.debug(f"Fazendo requisição GraphQL para código: {codigo}")
+        try:
+            response = requests.post(
+                self.api_url,
+                headers=self.headers,
+                json=query,
+                timeout=self.timeout
+            )
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout na API GraphQL para {codigo}: {e}")
+            raise
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Erro de conexão na API GraphQL para {codigo}: {e}")
+            raise
 
+        logger.debug(f"Resposta da API: HTTP {response.status_code}")
+        
         if response.status_code != 200:
+            logger.warning(f"Erro HTTP {response.status_code} ao consultar {codigo}")
+            logger.debug(f"Resposta: {response.text[:500]}")  # Primeiros 500 chars
             raise MelhorRastreioException(f"Erro HTTP {response.status_code}: {response.text}")
 
         data = response.json()

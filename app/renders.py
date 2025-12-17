@@ -231,3 +231,18 @@ async def render_usuarios_template(request: Request, current_user: str = Depends
     """Renderiza a página de gerenciamento de usuários."""
     return templates.TemplateResponse("usuarios.html", {"request": request, "username": current_user})
 
+
+@router.get("/logs", response_class=HTMLResponse)
+async def render_logs_template(request: Request, current_user: str = Depends(get_current_user)):
+    """Renderiza a página de visualização de logs."""
+    from app.logger import get_log_files
+    
+    # Obter lista de arquivos de log
+    log_files = get_log_files()
+    
+    return templates.TemplateResponse("logs.html", {
+        "request": request,
+        "username": current_user,
+        "log_files": log_files
+    })
+

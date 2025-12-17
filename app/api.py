@@ -796,3 +796,137 @@ async def delete_user(username: str, request: Request):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao deletar usuário: {e}")
+
+
+@router.get("/logs/{filename}")
+async def get_log_content(request: Request, filename: str, lines: int = 100, level: str = None):
+    """
+    Retorna o conteúdo de um arquivo de log específico.
+    
+    Args:
+        filename: Nome do arquivo de log
+        lines: Número de linhas para retornar (padrão: 100)
+        level: Filtro de nível (ERROR, WARNING, INFO, DEBUG)
+    
+    Returns:
+        JSON com o conteúdo do log
+    """
+    from app.logger import read_log_file
+    import os.path
+    
+    # Autenticação
+    try:
+        get_current_user(request)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    
+    # Validar filename (segurança) - usar basename para prevenir path traversal
+    safe_filename = os.path.basename(filename)
+    
+    # Validar extensão
+    if not safe_filename.endswith('.log'):
+        raise HTTPException(status_code=400, detail="Apenas arquivos .log são permitidos")
+    
+    # Lista branca de arquivos permitidos
+    allowed_files = [
+        'melhor_envio.log',
+        'errors.log',
+        'cronjob_monitor_shipments.log',
+        'cronjob_welcome_shipments.log'
+    ]
+    
+    # Verificar se o arquivo está na lista branca (ignora backups .log.1, .log.2, etc)
+    base_file = safe_filename.split('.log')[0] + '.log'
+    if base_file not in allowed_files and not any(safe_filename.startswith(f.replace('.log', '')) for f in allowed_files):
+        raise HTTPException(status_code=403, detail="Acesso ao arquivo não permitido")
+    
+    # Ler log
+    try:
+        log_lines = read_log_file(safe_filename, lines=lines, level_filter=level)
+        return {
+            "filename": safe_filename,
+            "lines": log_lines,
+            "total_lines": len(log_lines)
+        }
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Arquivo de log não encontrado")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao ler log: {e}")
+
+
+@router.get("/health/cronjobs")
+async def get_cronjobs_health(request: Request):
+    """
+    Retorna informações de saúde dos cronjobs.
+    
+    Returns:
+        JSON com status dos cronjobs
+    """
+    from app.webhooks import get_scheduler
+    
+    # Autenticação
+    try:
+        get_current_user(request)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    
+    try:
+        scheduler = get_scheduler()
+        
+        jobs_info = []
+        for job in scheduler.get_jobs():
+            next_run = job.next_run_time.isoformat() if job.next_run_time else None
+            jobs_info.append({
+                "id": job.id,
+                "name": job.name or job.id,
+                "next_run": next_run,
+                "pending": job.pending,
+            })
+        
+        return {
+            "scheduler_running": scheduler.running,
+            "jobs": jobs_info,
+            "total_jobs": len(jobs_info)
+        }
+    except Exception as e:
+        return {
+            "error": f"Erro ao obter status: {e}",
+            "scheduler_running": False,
+            "jobs": [],
+            "total_jobs": 0
+        }
+
+
+@router.post("/force_run_main_cron")
+async def force_run_main_cron(request: Request):
+    """
+    Força a execução imediata do cronjob principal de monitoramento.
+    Pausa o cronjob de boas-vindas por 20 minutos para evitar colisões.
+    
+    Returns:
+        JSON com resultado da execução
+    """
+    from app.webhooks import forcar_execucao_cron_principal
+    
+    # Autenticação
+    try:
+        get_current_user(request)
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="Não autenticado")
+    
+    try:
+        db = request.app.state.db
+        result = await forcar_execucao_cron_principal(db)
+        
+        if result.get("success"):
+            return JSONResponse(content=result, status_code=200)
+        else:
+            return JSONResponse(content=result, status_code=500)
+    except Exception as e:
+        return JSONResponse(
+            content={
+                "success": False,
+                "error": f"Erro ao forçar execução: {str(e)}"
+            },
+            status_code=500
+        )
