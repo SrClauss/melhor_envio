@@ -812,6 +812,7 @@ async def get_log_content(request: Request, filename: str, lines: int = 100, lev
         JSON com o conteúdo do log
     """
     from app.logger import read_log_file
+    import os.path
     
     # Autenticação
     try:
@@ -819,18 +820,36 @@ async def get_log_content(request: Request, filename: str, lines: int = 100, lev
     except HTTPException:
         raise HTTPException(status_code=401, detail="Não autenticado")
     
-    # Validar filename (segurança)
-    if '..' in filename or '/' in filename:
-        raise HTTPException(status_code=400, detail="Nome de arquivo inválido")
+    # Validar filename (segurança) - usar basename para prevenir path traversal
+    safe_filename = os.path.basename(filename)
+    
+    # Validar extensão
+    if not safe_filename.endswith('.log'):
+        raise HTTPException(status_code=400, detail="Apenas arquivos .log são permitidos")
+    
+    # Lista branca de arquivos permitidos
+    allowed_files = [
+        'melhor_envio.log',
+        'errors.log',
+        'cronjob_monitor_shipments.log',
+        'cronjob_welcome_shipments.log'
+    ]
+    
+    # Verificar se o arquivo está na lista branca (ignora backups .log.1, .log.2, etc)
+    base_file = safe_filename.split('.log')[0] + '.log'
+    if base_file not in allowed_files and not any(safe_filename.startswith(f.replace('.log', '')) for f in allowed_files):
+        raise HTTPException(status_code=403, detail="Acesso ao arquivo não permitido")
     
     # Ler log
     try:
-        log_lines = read_log_file(filename, lines=lines, level_filter=level)
+        log_lines = read_log_file(safe_filename, lines=lines, level_filter=level)
         return {
-            "filename": filename,
+            "filename": safe_filename,
             "lines": log_lines,
             "total_lines": len(log_lines)
         }
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Arquivo de log não encontrado")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao ler log: {e}")
 

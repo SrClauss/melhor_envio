@@ -26,9 +26,24 @@ LOG_DIR_FALLBACK = Path("/tmp/melhor_envio_logs")
 try:
     LOG_DIR = LOG_DIR_PREFERRED
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-except (PermissionError, FileNotFoundError):
-    LOG_DIR = LOG_DIR_FALLBACK
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except (PermissionError, FileNotFoundError, OSError) as e:
+    # Tentar fallback
+    try:
+        LOG_DIR = LOG_DIR_FALLBACK
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as fallback_error:
+        # Se ambos falharem, usar diretório atual
+        import sys
+        print(f"AVISO: Não foi possível criar diretórios de log: {e}, {fallback_error}", file=sys.stderr)
+        LOG_DIR = Path.cwd() / "logs"
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+        except Exception as final_error:
+            print(f"ERRO CRÍTICO: Não foi possível criar diretório de logs: {final_error}", file=sys.stderr)
+            # Usar diretório temporário do sistema como último recurso
+            import tempfile
+            LOG_DIR = Path(tempfile.gettempdir()) / "melhor_envio_logs"
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Formato de log estruturado
 LOG_FORMAT = '%(asctime)s | %(levelname)-8s | %(name)-20s | %(funcName)-25s | %(message)s'
@@ -233,7 +248,7 @@ def get_log_files():
 
 def read_log_file(filename: str, lines: int = 100, level_filter: str = None):
     """
-    Lê as últimas N linhas de um arquivo de log.
+    Lê as últimas N linhas de um arquivo de log de forma eficiente.
     
     Args:
         filename: Nome do arquivo (ex: 'melhor_envio.log')
@@ -249,9 +264,25 @@ def read_log_file(filename: str, lines: int = 100, level_filter: str = None):
         return []
     
     try:
-        # Ler arquivo
-        with open(log_file, 'r', encoding='utf-8') as f:
-            all_lines = f.readlines()
+        # Para arquivos grandes, usar leitura eficiente de trás para frente
+        file_size = log_file.stat().st_size
+        
+        # Se arquivo é pequeno (< 1 MB), ler tudo
+        if file_size < 1024 * 1024:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                all_lines = f.readlines()
+        else:
+            # Para arquivos grandes, ler apenas o final
+            # Estimar ~200 bytes por linha, ler buffer suficiente
+            buffer_size = min(lines * 250, file_size)
+            
+            with open(log_file, 'rb') as f:
+                # Ir para o final menos o buffer
+                f.seek(max(0, file_size - buffer_size))
+                # Descartar primeira linha parcial
+                f.readline()
+                # Ler resto
+                all_lines = [line.decode('utf-8', errors='ignore') for line in f.readlines()]
         
         # Filtrar por nível se especificado
         if level_filter:
