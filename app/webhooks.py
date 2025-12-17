@@ -905,20 +905,20 @@ def consultar_shipments(db=None):
                     try:
                         mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
                         cron_logger.info(f"[NOTIFICAÇÃO] Enviando WhatsApp para {telefone} (shipment {shipment_id})")
-                    #enviar_para_whatsapp(mensagem, telefone)
-                    enviar_para_whatsapp(mensagem, telefone)
-                    notifications_sent += 1
-                    print(f"[WHATSAPP] Notificação enviada para {telefone}")
-                    # Se for o primeiro envio, gravar flag para evitar reenvio da primeira mensagem
-                    if is_first_notify:
-                        try:
-                            merged['first_message_sent'] = True
-                            db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
-                            print(f"[FIRST_MESSAGE] Marcado first_message_sent para {shipment_id}")
-                        except Exception as e:
-                            print(f"Erro ao marcar first_message_sent para {shipment_id}: {e}")
-                except Exception as e:
-                    print(f"Falha ao enviar WhatsApp para {telefone}: {e}")
+                        #enviar_para_whatsapp(mensagem, telefone)
+                        enviar_para_whatsapp(mensagem, telefone)
+                        notifications_sent += 1
+                        print(f"[WHATSAPP] Notificação enviada para {telefone}")
+                        # Se for o primeiro envio, gravar flag para evitar reenvio da primeira mensagem
+                        if is_first_notify:
+                            try:
+                                merged['first_message_sent'] = True
+                                db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
+                                print(f"[FIRST_MESSAGE] Marcado first_message_sent para {shipment_id}")
+                            except Exception as e:
+                                print(f"Erro ao marcar first_message_sent para {shipment_id}: {e}")
+                    except Exception as e:
+                        print(f"Falha ao enviar WhatsApp para {telefone}: {e}")
             
             processed_count += 1
             
@@ -1065,14 +1065,14 @@ def consultar_shipments(db=None):
         except Exception as e:
             cron_logger.error(f"Erro ao limpar shipments antigos: {e}", exc_info=True)
         
-        cron_logger.info("=" * 80)
-        cron_logger.info(f"[RESUMO] Processados: {processed_count} | Notificações: {notifications_sent} | Removidos: {removed_count}")
-        cron_logger.info("=" * 80)
+            cron_logger.info("=" * 80)
+            cron_logger.info(f"[RESUMO] Processados: {processed_count} | Notificações: {notifications_sent} | Removidos: {removed_count}")
+            cron_logger.info("=" * 80)
         
-    else:
-        cron_logger.error(f"Erro ao consultar API Melhor Envio: HTTP {response.status_code}")
-        cron_logger.error(f"Detalhes: {response.text}")
-        raise HTTPException(status_code=response.status_code, detail=response.text)
+        else:
+            cron_logger.error(f"Erro ao consultar API Melhor Envio: HTTP {response.status_code}")
+            cron_logger.error(f"Detalhes: {response.text}")
+            raise HTTPException(status_code=response.status_code, detail=response.text)
     
     except Exception as e:
         cron_logger.error(f"❌ ERRO CRÍTICO ao consultar shipments: {e}", exc_info=True)
