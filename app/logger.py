@@ -18,9 +18,16 @@ from datetime import datetime
 from pathlib import Path
 
 
-# Diretório para logs
-LOG_DIR = Path("/app/logs")
-if not LOG_DIR.exists():
+# Diretório para logs - usar /tmp se /app não estiver disponível
+LOG_DIR_PREFERRED = Path("/app/logs")
+LOG_DIR_FALLBACK = Path("/tmp/melhor_envio_logs")
+
+# Tentar criar diretório preferencial, usar fallback se falhar
+try:
+    LOG_DIR = LOG_DIR_PREFERRED
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except (PermissionError, FileNotFoundError):
+    LOG_DIR = LOG_DIR_FALLBACK
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Formato de log estruturado
