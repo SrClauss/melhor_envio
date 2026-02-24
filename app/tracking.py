@@ -169,6 +169,32 @@ class MelhorRastreio:
             logger.warning("cf-turnstile token não definido; a consulta pode falhar")
         return self._consultar_graphql_searchparcel(codigo, cf_token)
 
+    def _detectar_tipo_rastreamento(self, codigo: str) -> str:
+        """
+        Detecta o tipo de transportadora baseado no formato do código de rastreamento.
+        
+        Formatos conhecidos:
+        - Correios: 2 letras + 9 dígitos + 2 letras (ex: AN584817404BR)
+        - Jadlog: 14 dígitos numéricos (ex: 10081611720301)
+        - Outros formatos serão tratados como 'correios' por padrão
+        """
+        import re
+        
+        # Correios: padrão AA123456789BR
+        if re.match(r'^[A-Z]{2}\d{9}[A-Z]{2}$', codigo.upper()):
+            return 'correios'
+        
+        # Jadlog: 14 dígitos numéricos
+        if re.match(r'^\d{14}$', codigo):
+            return 'jadlog'
+        
+        # Outros casos numéricos podem ser jadlog também
+        if codigo.isdigit() and len(codigo) >= 9:
+            return 'jadlog'
+        
+        # Padrão para casos não identificados
+        return 'correios'
+    
     def _consultar_graphql_searchparcel(self, codigo: str, cf_turnstile: str) -> Dict:
         """
         Variante de consulta usando a mutation `searchParcel` e cabeçalhos copiados
@@ -178,6 +204,9 @@ class MelhorRastreio:
         Este método não substitui `_consultar_graphql`, apenas proporciona uma
         alternativa quando a outra falha.
         """
+        # Detectar tipo de rastreamento baseado no formato do código
+        tracker_type = self._detectar_tipo_rastreamento(codigo)
+        
         # construir cabeçalhos baseados no exemplo
         h = {
             'accept': '*/*',
@@ -198,7 +227,7 @@ class MelhorRastreio:
         }
         query = {
             "query": "mutation searchParcel ($tracker: TrackerSearchInput!) {\n  result: searchParcel (tracker: $tracker) {\n    id\n    createdAt\n    updatedAt\n    lastStatus\n    lastSyncTracker\n    nextSyncTracker\n    estimatedDelivery\n    store {\n      name\n      picture\n    }\n    pudos {\n      type\n      trackingCode\n    }\n    trackers {\n      type\n      shippingService\n      trackingCode\n    }\n    trackingEvents {\n      trackerType\n      trackingCode\n      createdAt\n      translatedEventId\n      description\n      title\n      to\n      from\n      location {\n        zipcode\n        address\n        locality\n        number\n        complement\n        city\n        state\n        country\n      }\n      additionalInfo\n    }\n    pudoEvents {\n      pudoType\n      trackingCode\n      createdAt\n      translatedEventId\n      description\n      status\n      title\n      from\n      to\n      location {\n        zipcode\n        address\n        locality\n        number\n        complement\n        city\n        state\n        country\n      }\n      additionalInfo\n    }\n  }\n}\n",
-            "variables": {"tracker": {"trackingCode": codigo, "type": "correios"}}
+            "variables": {"tracker": {"trackingCode": codigo, "type": tracker_type}}
         }
         logger.debug(f"(searchParcel) Fazendo requisição GraphQL para código: {codigo}")
         try:
