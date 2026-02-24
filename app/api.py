@@ -532,13 +532,75 @@ async def enviar_whatsapp_shipment(
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Erro ao ler dados do shipment: {e}")
         else:
-            print(f"[WHATSAPP_MANUAL] Código {shipment_id} não existe no banco, tratando como código de rastreamento direto")
+            print(f"[WHATSAPP_MANUAL] Código {shipment_id} não existe no banco, tentando buscar na API do Melhor Envio")
+            
+            # Tentar buscar da API do Melhor Envio
+            try:
+                token_key = b"token:melhor_envio"
+                token = db.get(token_key)
+                
+                if token:
+                    bearer = token.decode('utf-8')
+                    headers = {
+                        'Accept': 'application/json',
+                        'Authorization': f'Bearer {bearer}'
+                    }
+                    
+                    # Buscar shipment específico pela API
+                    api_url = f'https://melhorenvio.com.br/api/v2/me/orders/{shipment_id}'
+                    resp = requests.get(api_url, headers=headers, timeout=10)
+                    
+                    if resp.status_code == 200:
+                        shipment_api = resp.json()
+                        
+                        # Extrair telefone e nome da API
+                        to_data = shipment_api.get('to', {})
+                        telefone = to_data.get('phone', '')
+                        nome = to_data.get('name', 'Cliente')
+                        codigo_rastreio = shipment_api.get('tracking') or shipment_api.get('self_tracking') or shipment_id
+                        
+                        # Preparar dados para salvar posteriormente
+                        shipment_data = {
+                            'id': shipment_id,
+                            'telefone': telefone,
+                            'nome': nome,
+                            'tracking': codigo_rastreio,
+                            'origem_api': True
+                        }
+                        
+                        print(f"[WHATSAPP_MANUAL] Dados encontrados na API: telefone={telefone}, nome={nome}, tracking={codigo_rastreio}")
+                    else:
+                        print(f"[WHATSAPP_MANUAL] Shipment não encontrado na API (status {resp.status_code}), usando código como rastreamento direto")
+                        # Se não encontrar na API, tentar como código de rastreamento direto
+                        if not telefone_param:
+                            raise HTTPException(
+                                status_code=404,
+                                detail=f"Shipment {shipment_id} não encontrado no banco nem na API do Melhor Envio. "
+                                       f"Para enviar via código de rastreamento direto, passe telefone_param na query string."
+                            )
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"[WHATSAPP_MANUAL] Erro ao buscar na API: {e}")
+                # Se falhar busca na API mas tem telefone_param, continuar
+                if not telefone_param:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Erro ao buscar shipment: {str(e)}. Passe telefone_param para continuar."
+                    )
+
+        # Usar telefone_param se foi passado (priority)
+        if telefone_param:
+            telefone = telefone_param
+        if nome_param:
+            nome = nome_param
 
         # Validar telefone obrigatório
         if not telefone:
             raise HTTPException(
                 status_code=400, 
-                detail="Telefone é obrigatório. Passe como parâmetro 'telefone_param' na query string (?telefone_param=5511999999999) ou certifique-se de que o shipment tem telefone cadastrado no banco."
+                detail=f"Telefone não encontrado para o shipment {shipment_id}. "
+                       f"Certifique-se de que o shipment tem telefone cadastrado ou passe telefone_param na query string."
             )
 
         # Validar código de rastreio
