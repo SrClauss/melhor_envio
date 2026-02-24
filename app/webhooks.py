@@ -850,75 +850,76 @@ def consultar_shipments(db=None):
                 else:
                     print(f"[PRIMEIRA_MSG] {shipment_id}: pulando - sem eventos válidos ainda")
 
-                if not existing_data:
-                    cron_logger.info(f"[NOVO] Criando entrada para shipment {shipment_id}")
+            # ========== SEMPRE PROCESSAR E SALVAR DADOS (não apenas na primeira vez) ==========
+            if not existing_data:
+                cron_logger.info(f"[NOVO] Criando entrada para shipment {shipment_id}")
 
-                # Montar objeto a gravar: mesclar campos, garantir que 'tracking' seja salvo sempre que disponível
-                merged = dict(old_data) if isinstance(old_data, dict) else {}
-                merged['nome'] = nome
-                merged['telefone'] = telefone
-                # Salvar o código de rastreio do próprio objeto (tracking) sempre que presente
-                if codigo_rastreio:
-                    merged['tracking'] = codigo_rastreio
-                # Salvar também o self_tracking (código próprio do Melhor Envio)
-                if codigo_self_tracking:
-                    merged['self_tracking'] = codigo_self_tracking
+            # Montar objeto a gravar: mesclar campos, garantir que 'tracking' seja salvo sempre que disponível
+            merged = dict(old_data) if isinstance(old_data, dict) else {}
+            merged['nome'] = nome
+            merged['telefone'] = telefone
+            # Salvar o código de rastreio do próprio objeto (tracking) sempre que presente
+            if codigo_rastreio:
+                merged['tracking'] = codigo_rastreio
+            # Salvar também o self_tracking (código próprio do Melhor Envio)
+            if codigo_self_tracking:
+                merged['self_tracking'] = codigo_self_tracking
 
-                # Só atualizar rastreio_detalhado quando for uma extração válida
-                if not is_error_rastreio:
-                    eventos = rastreio_detalhado.get('eventos', [])
-                    if eventos:
-                        ultimo_evento = eventos[0]  # Assumindo que o primeiro é o mais recente
-                        merged['rastreio_detalhado'] = {
-                            'codigo_original': rastreio_detalhado.get('codigo_original'),
-                            'status_atual': rastreio_detalhado.get('status_atual'),
-                            'ultimo_evento': ultimo_evento,
-                            'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
-                        }
-                        cron_logger.debug(f"Rastreio atualizado para {shipment_id}: {rastreio_detalhado.get('status_atual')}")
-                    else:
-                        merged['rastreio_detalhado'] = rastreio_detalhado
-                        cron_logger.debug(f"Rastreio sem eventos para {shipment_id}")
+            # Só atualizar rastreio_detalhado quando for uma extração válida
+            if not is_error_rastreio:
+                eventos = rastreio_detalhado.get('eventos', [])
+                if eventos:
+                    ultimo_evento = eventos[0]  # Assumindo que o primeiro é o mais recente
+                    merged['rastreio_detalhado'] = {
+                        'codigo_original': rastreio_detalhado.get('codigo_original'),
+                        'status_atual': rastreio_detalhado.get('status_atual'),
+                        'ultimo_evento': ultimo_evento,
+                        'consulta_realizada_em': rastreio_detalhado.get('consulta_realizada_em')
+                    }
+                    cron_logger.debug(f"Rastreio atualizado para {shipment_id}: {rastreio_detalhado.get('status_atual')}")
+                else:
+                    merged['rastreio_detalhado'] = rastreio_detalhado
+                    cron_logger.debug(f"Rastreio sem eventos para {shipment_id}")
 
-                # Gravar merged no banco
+            # Gravar merged no banco
+            try:
+                db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
+            except Exception as e:
+                cron_logger.error(f"Erro ao gravar dados para {shipment_id}: {e}", exc_info=True)
+
+            # Se houve erro, registrar last_error
+            if is_error_rastreio:
+                cron_logger.warning(f"[IGNORADO] Não atualizou rastreio_detalhado para {shipment_id} devido a erro")
+                cron_logger.debug(f"Erro detalhado: {rastreio_detalhado}")
                 try:
-                    db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
+                    last_error_key = f"etiqueta:{shipment_id}:last_error".encode('utf-8')
+                    last_error_value = json.dumps({
+                        "error": rastreio_detalhado,
+                        "timestamp": datetime.now().isoformat()
+                    }, ensure_ascii=False).encode('utf-8')
+                    db.set(last_error_key, last_error_value)
                 except Exception as e:
-                    cron_logger.error(f"Erro ao gravar dados para {shipment_id}: {e}", exc_info=True)
-
-                # Se houve erro, registrar last_error
-                if is_error_rastreio:
-                    cron_logger.warning(f"[IGNORADO] Não atualizou rastreio_detalhado para {shipment_id} devido a erro")
-                    cron_logger.debug(f"Erro detalhado: {rastreio_detalhado}")
-                    try:
-                        last_error_key = f"etiqueta:{shipment_id}:last_error".encode('utf-8')
-                        last_error_value = json.dumps({
-                            "error": rastreio_detalhado,
-                            "timestamp": datetime.now().isoformat()
-                        }, ensure_ascii=False).encode('utf-8')
-                        db.set(last_error_key, last_error_value)
-                    except Exception as e:
-                        cron_logger.error(f"Erro ao gravar last_error para {shipment_id}: {e}")
-                
-                # Enviar notificação se necessário
-                if should_notify:
-                    try:
-                        mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
-                        cron_logger.info(f"[NOTIFICAÇÃO] Enviando WhatsApp para {telefone} (shipment {shipment_id})")
-                        #enviar_para_whatsapp(mensagem, telefone)
-                        enviar_para_whatsapp(mensagem, telefone)
-                        notifications_sent += 1
-                        print(f"[WHATSAPP] Notificação enviada para {telefone}")
-                        # Se for o primeiro envio, gravar flag para evitar reenvio da primeira mensagem
-                        if is_first_notify:
-                            try:
-                                merged['first_message_sent'] = True
-                                db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
-                                print(f"[FIRST_MESSAGE] Marcado first_message_sent para {shipment_id}")
-                            except Exception as e:
-                                print(f"Erro ao marcar first_message_sent para {shipment_id}: {e}")
-                    except Exception as e:
-                        print(f"Falha ao enviar WhatsApp para {telefone}: {e}")
+                    cron_logger.error(f"Erro ao gravar last_error para {shipment_id}: {e}")
+            
+            # Enviar notificação se necessário
+            if should_notify:
+                try:
+                    mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
+                    cron_logger.info(f"[NOTIFICAÇÃO] Enviando WhatsApp para {telefone} (shipment {shipment_id})")
+                    #enviar_para_whatsapp(mensagem, telefone)
+                    enviar_para_whatsapp(mensagem, telefone)
+                    notifications_sent += 1
+                    print(f"[WHATSAPP] Notificação enviada para {telefone}")
+                    # Se for o primeiro envio, gravar flag para evitar reenvio da primeira mensagem
+                    if is_first_notify:
+                        try:
+                            merged['first_message_sent'] = True
+                            db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
+                            print(f"[FIRST_MESSAGE] Marcado first_message_sent para {shipment_id}")
+                        except Exception as e:
+                            print(f"Erro ao marcar first_message_sent para {shipment_id}: {e}")
+                except Exception as e:
+                    print(f"Falha ao enviar WhatsApp para {telefone}: {e}")
             
             processed_count += 1
             
