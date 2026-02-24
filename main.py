@@ -92,13 +92,19 @@ def abrir_banco_de_dados(max_retries: int = 8, base_sleep: float = 0.5):
 
 app.state.db = abrir_banco_de_dados()
 
-# Garantir usuário admin e atualizar a senha para o novo padrão
+# Garantir usuário admin existe (mas não sobrescrever senha existente)
 admin_key = b"user:admin"
-user = "admin"
-new_password = "    "
-hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
-# Sempre atualizar/definir a senha do admin para o novo valor
-app.state.db.set(b"user:" + user.encode('utf-8'), hashed_password)
+existing_admin = app.state.db.get(admin_key)
+
+if not existing_admin:
+    # Se admin não existe, criar com senha padrão
+    user = "admin"
+    new_password = "b0hi1%I958"  # Senha padrão inicial
+    hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
+    app.state.db.set(admin_key, hashed_password)
+    print(f"Usuário admin criado com senha padrão")
+else:
+    print(f"Usuário admin já existe, mantendo senha atual")
 
 # Incluir routers
 app.include_router(renders.router)
