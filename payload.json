@@ -1,0 +1,6 @@
+{
+  "query": "mutation searchParcel ($tracker: TrackerSearchInput!) {\n  result: searchParcel (tracker: $tracker) {\n    id\n    createdAt\n    updatedAt\n    lastStatus\n    lastSyncTracker\n    nextSyncTracker\n    estimatedDelivery\n    store { name picture }\n    pudos { type trackingCode }\n    trackers { type shippingService trackingCode }\n    trackingEvents { trackerType trackingCode createdAt translatedEventId description title to from location { zipcode address locality number complement city state country } additionalInfo }\n    pudoEvents { pudoType trackingCode createdAt translatedEventId description status title from to location { zipcode address locality number complement city state country } additionalInfo }\n  }\n}\n",
+  "variables": {
+    "tracker": { "trackingCode": "10081611720301", "type": "correios" }
+  }
+}
