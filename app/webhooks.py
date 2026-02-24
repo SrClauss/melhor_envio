@@ -588,8 +588,17 @@ def enviar_para_whatsapp(mensagem, telefone):
         raise Exception(f"Erro ao conectar com Umbler: {str(e)}")
 def consultar_shipments(db=None):
     """
-    Consulta shipments do Melhor Envio e monitora mudanças de rastreio.
-    Envia WhatsApp para clientes quando há nova movimentação.
+    🔍 CRON DE TRACKING - Monitora mudanças de status dos shipments
+    
+    RESPONSABILIDADE: 
+    - Consultar rastreio atual de todos os shipments
+    - Detectar mudanças no último evento
+    - Enviar notificação WhatsApp quando houver atualização
+    - Salvar novo estado no banco
+    
+    ⚠️ NÃO É RESPONSÁVEL POR:
+    - Enviar mensagens de boas-vindas (isso é feito pelo WELCOME CRON)
+    - Primeira mensagem ao criar etiqueta (welcome_message_sent)
     
     Implementa sistema robusto de retries para rate limits:
     - Shipments com rate limit (429) são colocados em fila de retry
@@ -785,72 +794,41 @@ def consultar_shipments(db=None):
 
             old_rastreio = old_data.get('rastreio_detalhado', '')
 
+            # ========================================================================
+            # TRACKING CRON: Responsável APENAS por monitorar MUDANÇAS de status
+            # Boas-vindas são enviadas pelo WELCOME CRON separadamente
+            # ========================================================================
+            
             # Determinar se rastreio atual é erro
             try:
                 is_error_rastreio = not isinstance(rastreio_detalhado, dict) or (isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado)
             except Exception:
                 is_error_rastreio = True
             
-            # Verificar se é especificamente erro PARCEL_NOT_FOUND (não enviar ao cliente)
+            # Verificar se é especificamente erro PARCEL_NOT_FOUND (não logar muito)
             is_parcel_not_found = False
             if is_error_rastreio and isinstance(rastreio_detalhado, dict) and 'erro' in rastreio_detalhado:
                 erro_txt = str(rastreio_detalhado['erro']).lower()
                 if ('parcel_not_found' in erro_txt) or ('parcel not' in erro_txt) or ('not found' in erro_txt):
                     is_parcel_not_found = True
-                    print(f"[PARCEL_NOT_FOUND] Não enviará mensagem para {shipment_id} - aguardando rastreio ficar disponível")
+                    cron_logger.debug(f"[PARCEL_NOT_FOUND] Rastreio ainda não disponível para {shipment_id}")
 
-            # Determinar se vamos enviar a primeira mensagem (ao criar a etiqueta ou se ainda não foi enviada)
-            is_first_notify = False
-            try:
-                first_message_sent = old_data.get('first_message_sent', False)
-                
-                # Para dados antigos sem o flag, verificar se já teve atividade
-                if not first_message_sent and old_data:
-                    # Se tem rastreio processado ou eventos, assumir que já foi notificado
-                    rastreio_completo = old_data.get('rastreio_completo', '')
-                    rastreio_detalhado = old_data.get('rastreio_detalhado', {})
-                    events = rastreio_detalhado.get('eventos', []) if isinstance(rastreio_detalhado, dict) else []
-                    
-                    has_processed_tracking = (rastreio_completo and 
-                                            rastreio_completo not in ['Sem dados de rastreio', 'Ainda não processado'])
-                    has_events = len(events) > 0
-                    
-                    if has_processed_tracking or has_events:
-                        first_message_sent = True  # Tratar como já notificado
-                
-                # Se não foi enviado ainda, marcar para enviar primeira mensagem
-                if not first_message_sent:
-                    is_first_notify = True
-            except Exception:
-                is_first_notify = True
-
-            # Verificar mudança para notificação (apenas quando rastreio válido)
+            # ========== DETECTAR MUDANÇAS DE STATUS (única responsabilidade) ==========
+            # Notificar SOMENTE quando houver eventos E o último evento for diferente
             if not is_error_rastreio:
-                # Notificar somente quando houver eventos e o último evento for diferente
-                # do que está salvo no banco. Evita enviar notificações do tipo
-                # "Sem movimentação" repetidamente quando a API retorna estruturas
-                # vazias ou apenas metadados que mudaram sem evento novo.
                 eventos = rastreio_detalhado.get('eventos', [])
                 if eventos:
                     ultimo_evento = eventos[0]
                     old_ultimo = old_data.get('rastreio_detalhado', {}).get('ultimo_evento', {})
+                    
+                    # Verificar se houve mudança real no evento
                     if ultimo_evento != old_ultimo:
                         should_notify = True
-                        print(f"[MUDANÇA] {shipment_id}: rastreio atualizado")
+                        cron_logger.info(f"[MUDANÇA] {shipment_id}: novo status detectado - {rastreio_detalhado.get('status_atual')}")
+                    else:
+                        cron_logger.debug(f"[SEM MUDANÇA] {shipment_id}: status inalterado")
 
-            # Enviar primeira mensagem para etiquetas novas ou antigas sem a flag
-            # ⚠️ IMPORTANTE: NÃO enviar se for erro PARCEL_NOT_FOUND
-            # ⚠️ IMPORTANTE: NÃO enviar se rastreio não tem eventos (evita "Sem movimentação registrada")
-            if is_first_notify and not is_parcel_not_found:
-                # Verificar se há eventos válidos antes de enviar
-                eventos_validos = rastreio_detalhado.get('eventos', []) if isinstance(rastreio_detalhado, dict) and not is_error_rastreio else []
-                if eventos_validos:
-                    should_notify = True
-                    print(f"[PRIMEIRA_MSG] {shipment_id}: enviando primeira mensagem")
-                else:
-                    print(f"[PRIMEIRA_MSG] {shipment_id}: pulando - sem eventos válidos ainda")
-
-            # ========== SEMPRE PROCESSAR E SALVAR DADOS (não apenas na primeira vez) ==========
+            # ========== SEMPRE PROCESSAR E SALVAR DADOS ==========
             if not existing_data:
                 cron_logger.info(f"[NOVO] Criando entrada para shipment {shipment_id}")
 
@@ -901,25 +879,17 @@ def consultar_shipments(db=None):
                 except Exception as e:
                     cron_logger.error(f"Erro ao gravar last_error para {shipment_id}: {e}")
             
-            # Enviar notificação se necessário
+            # ========== ENVIAR NOTIFICAÇÃO DE MUDANÇA ==========
+            # Apenas envia se detectou mudança de status (should_notify = True)
             if should_notify:
                 try:
                     mensagem = formatar_rastreio_para_whatsapp(rastreio_detalhado, shipment, nome)
-                    cron_logger.info(f"[NOTIFICAÇÃO] Enviando WhatsApp para {telefone} (shipment {shipment_id})")
-                    #enviar_para_whatsapp(mensagem, telefone)
+                    cron_logger.info(f"[NOTIFICAÇÃO] Enviando atualização WhatsApp para {telefone} - {shipment_id}")
                     enviar_para_whatsapp(mensagem, telefone)
                     notifications_sent += 1
-                    print(f"[WHATSAPP] Notificação enviada para {telefone}")
-                    # Se for o primeiro envio, gravar flag para evitar reenvio da primeira mensagem
-                    if is_first_notify:
-                        try:
-                            merged['first_message_sent'] = True
-                            db.set(key, json.dumps(merged, ensure_ascii=False).encode('utf-8'))
-                            print(f"[FIRST_MESSAGE] Marcado first_message_sent para {shipment_id}")
-                        except Exception as e:
-                            print(f"Erro ao marcar first_message_sent para {shipment_id}: {e}")
+                    cron_logger.info(f"[✅ ENVIADO] Notificação de mudança entregue para {telefone}")
                 except Exception as e:
-                    print(f"Falha ao enviar WhatsApp para {telefone}: {e}")
+                    cron_logger.error(f"[❌ FALHA] Erro ao enviar WhatsApp para {telefone}: {e}")
             
             processed_count += 1
             
@@ -1791,13 +1761,18 @@ def enviar_mensagem_boas_vindas(shipment_data, db=None):
 
 def consultar_novos_shipments_welcome(db=None):
     """
-    Consulta shipments do Melhor Envio e envia mensagem de BOAS-VINDAS para novos envios.
-
-    Esta função é executada pelo cronjob de boas-vindas (a cada 10 minutos).
-    Ela identifica shipments novos (que não estão no banco ou não receberam welcome)
-    e envia a mensagem de apresentação.
-
-    NÃO faz consulta de rastreio (deixa para o cronjob principal).
+    👋 CRON DE WELCOME - Envia mensagens de boas-vindas para novos shipments
+    
+    RESPONSABILIDADE:
+    - Detectar shipments novos (não estão no banco OU sem welcome_message_sent)
+    - Enviar mensagem de boas-vindas personalizada
+    - Marcar welcome_message_sent = True
+    
+    ⚠️ NÃO É RESPONSÁVEL POR:
+    - Monitorar mudanças de status (isso é feito pelo TRACKING CRON)
+    - Consultar rastreio detalhado (apenas usa código para link)
+    
+    Executado a cada 10 minutos (configurável).
     """
     if db is None:
         db = rocksdbpy.open('database.db', rocksdbpy.Option())
