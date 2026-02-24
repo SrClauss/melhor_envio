@@ -18,6 +18,7 @@ Atualização: 19/11/2025 - Adicionado suporte para eventos traduzidos completos
 
 import requests
 import json
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 from app.logger import get_logger
@@ -159,6 +160,81 @@ class MelhorRastreio:
             MelhorRastreio._eventos_traduzidos_cache = {}
     
     def _consultar_graphql(self, codigo: str) -> Dict:
+        """
+        Wrapper para a consulta `searchParcel` usando o mesmo cabeçalho do
+        frontend. Tenta obter token cf-turnstile de variável de ambiente.
+        """
+        cf_token = os.getenv('CF_TURNSTILE_TOKEN', '')
+        if not cf_token:
+            logger.warning("cf-turnstile token não definido; a consulta pode falhar")
+        return self._consultar_graphql_searchparcel(codigo, cf_token)
+
+    def _consultar_graphql_searchparcel(self, codigo: str, cf_turnstile: str) -> Dict:
+        """
+        Variante de consulta usando a mutation `searchParcel` e cabeçalhos copiados
+        dos exemplos de fetch/curl. Aceita token cf-turnstile que normalmente vem
+        do navegador; sem ele a API frequentemente retorna 403 ou objeto vazio.
+
+        Este método não substitui `_consultar_graphql`, apenas proporciona uma
+        alternativa quando a outra falha.
+        """
+        # construir cabeçalhos baseados no exemplo
+        h = {
+            'accept': '*/*',
+            'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'cf-turnstile-response': cf_turnstile,
+            'content-type': 'application/json',
+            'origin': 'https://melhorrastreio.com.br',
+            'referer': 'https://melhorrastreio.com.br/',
+            'priority': 'u=1, i',
+            'sec-ch-ua': '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Linux"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-site',
+            'skip': 'false',
+            'user-agent': self.headers.get('User-Agent'),
+        }
+        query = {
+            "query": "mutation searchParcel ($tracker: TrackerSearchInput!) {\n  result: searchParcel (tracker: $tracker) {\n    id\n    createdAt\n    updatedAt\n    lastStatus\n    lastSyncTracker\n    nextSyncTracker\n    estimatedDelivery\n    store {\n      name\n      picture\n    }\n    pudos {\n      type\n      trackingCode\n    }\n    trackers {\n      type\n      shippingService\n      trackingCode\n    }\n    trackingEvents {\n      trackerType\n      trackingCode\n      createdAt\n      translatedEventId\n      description\n      title\n      to\n      from\n      location {\n        zipcode\n        address\n        locality\n        number\n        complement\n        city\n        state\n        country\n      }\n      additionalInfo\n    }\n    pudoEvents {\n      pudoType\n      trackingCode\n      createdAt\n      translatedEventId\n      description\n      status\n      title\n      from\n      to\n      location {\n        zipcode\n        address\n        locality\n        number\n        complement\n        city\n        state\n        country\n      }\n      additionalInfo\n    }\n  }\n}\n",
+            "variables": {"tracker": {"trackingCode": codigo, "type": "correios"}}
+        }
+        logger.debug(f"(searchParcel) Fazendo requisição GraphQL para código: {codigo}")
+        try:
+            response = requests.post(
+                "https://melhor-rastreio-api.melhorrastreio.com.br/graphql",
+                headers=h,
+                json=query,
+                timeout=self.timeout
+            )
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout na API GraphQL para {codigo}: {e}")
+            raise
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Erro de conexão na API GraphQL para {codigo}: {e}")
+            raise
+
+        logger.debug(f"Resposta da API: HTTP {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.warning(f"Erro HTTP {response.status_code} ao consultar {codigo}")
+            logger.debug(f"Resposta: {response.text[:500]}")
+            raise MelhorRastreioException(f"Erro HTTP {response.status_code}: {response.text}")
+
+        data = response.json()
+
+        # Verificar erros da API
+        if 'errors' in data:
+            raise MelhorRastreioException(f"Erro da API: {data['errors']}")
+
+        # Retornar dados do result
+        if 'data' in data and 'result' in data['data']:
+            return data['data']['result']
+        
+        return {}
+
+    def _consultar_graphql_old(self, codigo: str) -> Dict:
         """
         Executa consulta GraphQL na API com TODOS os campos disponíveis
 
