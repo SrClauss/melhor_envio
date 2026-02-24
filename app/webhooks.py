@@ -1070,9 +1070,13 @@ def consultar_shipments(db=None):
             cron_logger.info("=" * 80)
         
         else:
-            cron_logger.error(f"Erro ao consultar API Melhor Envio: HTTP {response.status_code}")
-            cron_logger.error(f"Detalhes: {response.text}")
-            raise HTTPException(status_code=response.status_code, detail=response.text)
+            # HTTP 204 (No Content) é válido quando não há mais dados/páginas
+            if response.status_code == 204:
+                cron_logger.debug("API retornou 204 (No Content) - sem mais dados disponíveis")
+            else:
+                cron_logger.error(f"Erro ao consultar API Melhor Envio: HTTP {response.status_code}")
+                cron_logger.error(f"Detalhes: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
     
     except Exception as e:
         cron_logger.error(f"❌ ERRO CRÍTICO ao consultar shipments: {e}", exc_info=True)
