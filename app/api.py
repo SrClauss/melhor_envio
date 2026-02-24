@@ -485,14 +485,22 @@ async def get_tracking(codigo: str):
 
 
 @router.post("/shipments/{shipment_id}/enviar-whatsapp")
-async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
+async def enviar_whatsapp_shipment(
+    shipment_id: str, 
+    request: Request,
+    telefone_param: str = None,
+    nome_param: str = None
+):
     """
-    Força o envio de mensagem WhatsApp para um shipment específico.
+    Força o envio de mensagem WhatsApp para um código de rastreamento.
 
-    NOVO: Consulta o rastreamento via GraphQL ANTES de enviar para garantir dados atualizados.
+    NOVO: Funciona como tracking API - aceita qualquer código mesmo que não esteja no banco.
+    Se não encontrar no banco, busca via tracking API e usa parâmetros telefone/nome.
 
     Args:
-        shipment_id: ID do shipment no Melhor Envio
+        shipment_id: Código de rastreamento (pode ser ID do Melhor Envio ou código Correios/Jadlog)
+        telefone_param: Telefone para envio (opcional se existir no banco)
+        nome_param: Nome do destinatário (opcional, padrão "Cliente")
 
     Returns:
         JSON com status do envio
@@ -502,29 +510,40 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
     try:
         db = request.app.state.db
 
-        # Buscar dados do shipment no banco
+        # Buscar dados do shipment no banco (opcional agora)
         key = f"etiqueta:{shipment_id}".encode('utf-8')
         existing_data = db.get(key)
 
-        if not existing_data:
-            raise HTTPException(status_code=404, detail="Shipment não encontrado no banco de dados")
+        shipment_data = {}
+        codigo_rastreio = shipment_id
+        telefone = telefone_param
+        nome = nome_param or 'Cliente'
 
-        # Carregar dados
-        try:
-            shipment_data = json.loads(existing_data.decode('utf-8'))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Erro ao ler dados do shipment: {e}")
+        if existing_data:
+            # Se existe no banco, usar dados salvos
+            try:
+                shipment_data = json.loads(existing_data.decode('utf-8'))
+                # Preferir telefone do banco se não foi passado como parâmetro
+                if not telefone:
+                    telefone = shipment_data.get('telefone')
+                if not nome_param:
+                    nome = shipment_data.get('nome', 'Cliente')
+                codigo_rastreio = shipment_data.get('tracking', shipment_id)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Erro ao ler dados do shipment: {e}")
+        else:
+            print(f"[WHATSAPP_MANUAL] Código {shipment_id} não existe no banco, tratando como código de rastreamento direto")
 
-        # Verificar se tem dados necessários
-        telefone = shipment_data.get('telefone')
-        nome = shipment_data.get('nome', '')
-        codigo_rastreio = shipment_data.get('tracking')
-
+        # Validar telefone obrigatório
         if not telefone:
-            raise HTTPException(status_code=400, detail="Shipment não possui telefone cadastrado")
+            raise HTTPException(
+                status_code=400, 
+                detail="Telefone é obrigatório. Passe como parâmetro 'telefone_param' na query string (?telefone_param=5511999999999) ou certifique-se de que o shipment tem telefone cadastrado no banco."
+            )
 
+        # Validar código de rastreio
         if not codigo_rastreio:
-            raise HTTPException(status_code=400, detail="Shipment não possui código de rastreio")
+            raise HTTPException(status_code=400, detail="Código de rastreio não identificado")
 
         # Consultar rastreamento ATUAL via GraphQL antes de enviar
         print(f"[WHATSAPP_MANUAL] Consultando rastreamento atualizado via GraphQL para {codigo_rastreio}")
@@ -628,11 +647,17 @@ async def enviar_whatsapp_shipment(shipment_id: str, request: Request):
         try:
             resultado = webhooks.enviar_para_whatsapp(mensagem, telefone)
 
-            # Marcar como enviado e salvar rastreamento atualizado
+            # Marcar como enviado e salvar/atualizar no banco
             shipment_data['first_message_sent'] = True
+            shipment_data['telefone'] = telefone  # Garantir que telefone está salvo
+            shipment_data['nome'] = nome  # Garantir que nome está salvo
+            shipment_data['tracking'] = codigo_rastreio  # Garantir que código está salvo
+            
+            # Salvar no banco (cria se não existia, atualiza se já existia)
             db.set(key, json.dumps(shipment_data, ensure_ascii=False).encode('utf-8'))
 
-            data_source_suffix = " (rastreamento atualizado)" if rastreamento_atualizado else " (usando dados salvos)"
+            data_source = "banco local" if existing_data else "tracking API (novo)"
+            data_source_suffix = f" (rastreamento via {data_source})" if rastreamento_atualizado else " (usando dados salvos)"
             return {
                 "success": True,
                 "message": f"Mensagem WhatsApp enviada com sucesso{data_source_suffix}",
