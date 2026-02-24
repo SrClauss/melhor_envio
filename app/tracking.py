@@ -508,8 +508,9 @@ class MelhorRastreio:
             eventos_processados.append(evento_estruturado)
 
         # Ordenar por data (mais recente primeiro)
+        # IMPORTANTE: usar data_registro primeiro, se não tiver usar data_criacao
         eventos_processados.sort(
-            key=lambda x: x['data_registro'] or '',
+            key=lambda x: x['data_registro'] or x['data_criacao'] or '',
             reverse=True
         )
 
